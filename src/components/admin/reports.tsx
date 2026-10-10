@@ -122,6 +122,8 @@ export function Dashboard() {
   const [from, setFrom] = useState(localDate());
   const [to, setTo] = useState(localDate());
   const [items, setItems] = useState<Appointment[]>([]);
+  const [barbers, setBarbers] = useState<{ id: string; display_name: string; active: boolean }[]>([]);
+  const [barberId, setBarberId] = useState("");
   const [clients, setClients] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -133,13 +135,13 @@ export function Dashboard() {
       const db = browserDb();
       const all: Appointment[] = [];
       for (let offset = 0; ; offset += 1000) {
-        const { data, error } = await db
+        let query = db
           .from("appointments")
           .select("*")
           .gte("booking_date", from)
-          .lte("booking_date", to)
-          .order("id")
-          .range(offset, offset + 999);
+          .lte("booking_date", to);
+        if (barberId) query = query.eq("barber_id", barberId);
+        const { data, error } = await query.order("id").range(offset, offset + 999);
         if (error) throw error;
         all.push(...data);
         if (data.length < 1000) break;
@@ -157,10 +159,20 @@ export function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [from, to]);
+  }, [from, to, barberId]);
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    void browserDb()
+      .from("barbers")
+      .select("id,display_name,active")
+      .order("display_name")
+      .then(({ data, error }) => {
+        if (error) setError(readableError(error));
+        else setBarbers(data ?? []);
+      });
+  }, []);
   function shortcut(days: number) {
     const today = localDate();
     const d = new Date(`${today}T12:00:00-03:00`);
@@ -198,6 +210,17 @@ export function Dashboard() {
     <>
       <h2>Dashboard</h2>
       <div className="row section-head">
+        <label>
+          Barbeiro
+          <select value={barberId} onChange={(event) => setBarberId(event.target.value)}>
+            <option value="">Todos</option>
+            {barbers.map((barber) => (
+              <option key={barber.id} value={barber.id}>
+                {barber.display_name}{barber.active ? "" : " (inativo)"}
+              </option>
+            ))}
+          </select>
+        </label>
         <label>
           De
           <input

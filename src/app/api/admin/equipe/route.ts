@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/admin";
+import { canCreateTeamRole } from "@/lib/role-access";
 import { privilegedDb } from "@/lib/supabase/server";
 import { readableError } from "@/lib/validation";
 
@@ -111,7 +112,7 @@ export async function POST(request: Request) {
   try {
     const { user: actor, role } = await actorContext();
     const input = createSchema.parse(await request.json());
-    if (input.role === "admin" && role !== "master")
+    if (!canCreateTeamRole(role, input.role))
       return NextResponse.json(
         { error: "Admin comum só pode criar barbeiros." },
         { status: 403 },

@@ -126,7 +126,7 @@ describe("Transições de status", () => {
   });
   it("impede saltos e reabertura de estados finais", () => {
     expect(canTransition("pendente", "concluido", past, now)).toBe(false);
-    expect(canTransition("confirmado", "cancelado", past, now)).toBe(false);
+    expect(canTransition("confirmado", "cancelado", past, now)).toBe(true);
     for (const status of ["concluido", "cancelado", "faltou"] as Status[])
       expect(canTransition(status, "confirmado", past, now)).toBe(false);
   });

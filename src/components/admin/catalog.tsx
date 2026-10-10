@@ -192,7 +192,7 @@ export function Catalog() {
   );
 }
 type Block = Busy & { id: string; reason: string | null };
-export function Blocks() {
+export function Blocks({ barberMode = false }: { barberMode?: boolean }) {
   const [items, setItems] = useState<Block[]>([]);
   const [allDay, setAllDay] = useState(true);
   const [error, setError] = useState("");
@@ -258,7 +258,7 @@ export function Blocks() {
   }
   return (
     <>
-      <h2>Bloqueios da agenda</h2>
+      <h2>{barberMode ? "Meus bloqueios" : "Bloqueios da agenda"}</h2>
       {error && (
         <p className="error" role="alert">
           {error}

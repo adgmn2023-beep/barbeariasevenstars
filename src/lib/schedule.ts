@@ -38,8 +38,8 @@ export function canTransition(
   return (
     (from === "pendente" && (to === "confirmado" || to === "cancelado")) ||
     (from === "confirmado" &&
-      (to === "concluido" || to === "faltou") &&
-      new Date(end) <= now)
+      (to === "cancelado" ||
+        ((to === "concluido" || to === "faltou") && new Date(end) <= now)))
   );
 }
 export function availableSlots(

@@ -57,6 +57,7 @@ export function AppointmentCard({
       <p>
         {dateLabel(item.start_at)} · {money(item.price)}
       </p>
+      <p className="muted">Barbeiro: {item.barber_name ?? "Não informado"}</p>
       {item.cancel_reason && <p className="error">{item.cancel_reason}</p>}
       <div className="row">
         {item.status === "pendente" && (
@@ -94,6 +95,15 @@ export function AppointmentCard({
               Marcar como Faltou
             </button>
           </>
+        )}
+        {item.status === "confirmado" && (
+          <button
+            className="button outline danger"
+            disabled={busy}
+            onClick={() => dialog.current?.showModal()}
+          >
+            Cancelar
+          </button>
         )}
       </div>
       {error && (

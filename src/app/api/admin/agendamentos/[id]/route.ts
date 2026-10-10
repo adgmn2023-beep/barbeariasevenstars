@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAdmin } from "@/lib/admin";
-import { privilegedDb } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/admin";
 import { statusSchema, readableError } from "@/lib/validation";
 import { canTransition, dateLabel, timeLabel } from "@/lib/schedule";
 import { sendPush } from "@/lib/push";
@@ -10,10 +9,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireAdmin();
+    const { db } = await requireStaff();
     const id = z.uuid().parse((await params).id);
     const body = statusSchema.parse(await request.json());
-    const db = privilegedDb();
     const { data: old, error: readError } = await db
       .from("appointments")
       .select("*")

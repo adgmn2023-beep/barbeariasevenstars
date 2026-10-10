@@ -1,4 +1,6 @@
 import { Catalog } from "@/components/admin/catalog";
-export default function Page() {
+import { requireAdminPage } from "@/lib/admin";
+export default async function Page() {
+  await requireAdminPage();
   return <Catalog />;
 }

@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { canAccessPanel } from "@/lib/role-access";
 export async function proxy(request: NextRequest) {
   if (
     request.nextUrl.pathname.startsWith("/api/") &&
@@ -63,18 +64,18 @@ export async function proxy(request: NextRequest) {
       path === "/trocar-senha" || path === "/api/conta/trocar-senha";
     if (data?.must_change_password && !passwordFlow)
       target = `/trocar-senha?required=1&next=${encodeURIComponent(path + request.nextUrl.search)}`;
-    if (path.startsWith("/painelinterno") && data?.role === "barber") {
+  }
+  if (user && request.nextUrl.pathname.startsWith("/painelinterno")) {
+    let barberActive = false;
+    if (role === "barber") {
       const { data: barber } = await db
         .from("barbers")
         .select("active")
         .eq("profile_id", user.id)
         .maybeSingle();
-      if (!barber?.active) target = "/";
+      barberActive = !!barber?.active;
     }
-  }
-  if (user && request.nextUrl.pathname.startsWith("/painelinterno")) {
-    if (!role || !["barber", "admin", "master"].includes(role))
-      target = "/";
+    if (!canAccessPanel(role, barberActive)) target = "/";
   }
   if (target) {
     const redirect = NextResponse.redirect(new URL(target, request.url));

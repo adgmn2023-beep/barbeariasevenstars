@@ -6,7 +6,11 @@ import { PENDING_REMINDER_MS, POLLING_MS } from "@/lib/notification-config";
 import type { Appointment } from "@/lib/types";
 import { readableError } from "@/lib/validation";
 import { AppointmentCard } from "./appointment-card";
-export function AdminAlerts() {
+export function AdminAlerts({
+  role,
+}: {
+  role: "barber" | "admin" | "master";
+}) {
   const [enabled, setEnabled] = useState(false);
   const [prompt, setPrompt] = useState(true);
   const [pending, setPending] = useState<Appointment[]>([]);
@@ -49,7 +53,9 @@ export function AdminAlerts() {
       for (const item of items) {
         if (!seen.current.has(item.id)) {
           announce(
-            `Cliente ${item.profiles?.nome ?? "da barbearia"}, realizou um novo agendamento.`,
+            role === "barber"
+              ? `Cliente ${item.profiles?.nome ?? "da barbearia"}, realizou um novo agendamento.`
+              : `Cliente ${item.profiles?.nome ?? "da barbearia"}, novo agendamento com ${item.barber_name ?? "a equipe"}.`,
             true,
           );
           seen.current.add(item.id);
@@ -78,7 +84,7 @@ export function AdminAlerts() {
         /* O alerta funciona mesmo sem armazenamento. */
       }
     },
-    [announce],
+    [announce, role],
   );
   const refresh = useCallback(async () => {
     if (loading.current) return;

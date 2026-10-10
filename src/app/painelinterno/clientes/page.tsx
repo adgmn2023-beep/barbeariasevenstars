@@ -1,4 +1,6 @@
 import { Clients } from "@/components/admin/reports";
-export default function Page() {
+import { requireAdminPage } from "@/lib/admin";
+export default async function Page() {
+  await requireAdminPage();
   return <Clients />;
 }

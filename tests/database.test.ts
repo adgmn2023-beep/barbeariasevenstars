@@ -344,6 +344,16 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     );
     await asUser(ids.barberBProfile);
     expect((await db.query("select * from blocked_slots")).rows).toHaveLength(0);
+    await db.query(
+      "insert into blocked_slots(barber_id,start_at,end_at) values($1,$2,$3)",
+      [ids.barberB, `${day}T10:00:00-03:00`, `${day}T11:00:00-03:00`],
+    );
+    await expect(
+      db.query(
+        "insert into blocked_slots(barber_id,start_at,end_at) values($1,$2,$3)",
+        [ids.barberA, `${day}T11:00:00-03:00`, `${day}T12:00:00-03:00`],
+      ),
+    ).rejects.toThrow(/row-level security/i);
     expect(
       (
         await db.query("select * from get_busy_ranges($1::date,$2::uuid)", [

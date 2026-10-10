@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAdmin } from "@/lib/admin";
+import { requireStaff } from "@/lib/admin";
 import {
   blockSchema,
   hoursSchema,
@@ -13,8 +13,10 @@ export async function POST(
   { params }: { params: Promise<{ resource: string }> },
 ) {
   try {
-    const { db } = await requireAdmin();
+    const { db, role, barberId } = await requireStaff();
     const { resource } = await params;
+    if (resource !== "blocked_slots" && !["admin", "master"].includes(role))
+      return NextResponse.json({ error: "Acesso restrito ao administrador." }, { status: 403 });
     const body = await request.json();
     let error;
     if (resource === "services") {
@@ -27,9 +29,11 @@ export async function POST(
         : await db.from("services").insert(values);
       error = result.error;
     } else if (resource === "blocked_slots") {
-      const result = await db
-        .from("blocked_slots")
-        .insert(blockSchema.parse(body));
+      const values = blockSchema.parse(body);
+      const result = await db.from("blocked_slots").insert({
+        ...values,
+        barber_id: role === "barber" ? barberId : (values.barber_id ?? null),
+      });
       error = result.error;
     } else if (resource === "business_hours") {
       const values = hoursSchema.parse(body);
@@ -60,8 +64,10 @@ export async function DELETE(
   { params }: { params: Promise<{ resource: string }> },
 ) {
   try {
-    const { db } = await requireAdmin();
+    const { db, role } = await requireStaff();
     const { resource } = await params;
+    if (resource !== "blocked_slots" && !["admin", "master"].includes(role))
+      return NextResponse.json({ error: "Acesso restrito ao administrador." }, { status: 403 });
     if (!["services", "blocked_slots"].includes(resource))
       return NextResponse.json(
         { error: "Operação não permitida." },

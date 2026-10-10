@@ -13,6 +13,7 @@ export const blockSchema = z
     start_at: z.iso.datetime({ offset: true }),
     end_at: z.iso.datetime({ offset: true }),
     reason: z.string().trim().max(500).nullable().optional(),
+    barber_id: z.uuid().nullable().optional(),
   })
   .refine((v) => new Date(v.end_at) > new Date(v.start_at), {
     message: "O fim deve ser posterior ao início.",
