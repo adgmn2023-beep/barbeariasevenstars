@@ -1,0 +1,4 @@
+import Link from 'next/link';
+import {redirect} from 'next/navigation';
+import {serverDb} from '@/lib/supabase/server';
+export default async function Layout({children}:{children:React.ReactNode}){const db=await serverDb();const {data:{user}}=await db.auth.getUser();if(!user)redirect('/login?next=/painelinterno');const {data}=await db.from('profiles').select('role').eq('id',user.id).single();if(data?.role!=='admin')redirect('/');return <><p className="eyebrow">GESTÃO SEVEN STARS</p><div className="row spaced"><h1>Painel interno</h1><span className="badge">UMA AGENDA. TODO O CONTROLE.</span></div><nav className="admin-tabs" aria-label="Administração">{[['','Agenda'],['servicos','Serviços'],['bloqueios','Bloqueios'],['clientes','Clientes'],['dashboard','Dashboard'],['configuracoes','Configurações']].map(([path,name])=><Link href={`/painelinterno${path?'/'+path:''}`} key={name}>{name}</Link>)}</nav>{children}</>}
