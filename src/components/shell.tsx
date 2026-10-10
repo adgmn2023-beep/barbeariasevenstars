@@ -36,7 +36,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
     const { data } = db.auth.onAuthStateChange(() => {
       setTimeout(() => void load(), 0);
     });
-    return () => data.subscription.unsubscribe();
+    window.addEventListener("seven-auth-changed", load);
+    return () => {
+      window.removeEventListener("seven-auth-changed", load);
+      data.subscription.unsubscribe();
+    };
   }, []);
   const links = [
     { href: "/", label: "Agendar", icon: Scissors },

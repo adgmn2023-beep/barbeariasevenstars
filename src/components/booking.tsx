@@ -1,5 +1,6 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   ArrowLeft,
   ArrowRight,
@@ -7,19 +8,24 @@ import {
   Clock3,
   Scissors,
   ShieldCheck,
-  Star,
   UserRound,
 } from "lucide-react";
 import { browserDb, configured } from "@/lib/supabase/client";
 import {
   availableSlotsForAnyBarber,
-  dateLabel,
   localDate,
   money,
   timeLabel,
 } from "@/lib/schedule";
+import {
+  summarizeServices,
+  BOOKING_SUCCESS_MESSAGE,
+} from "@/lib/booking-summary";
 import type { Service, Hours, Settings, Busy } from "@/lib/types";
 import { readableError } from "@/lib/validation";
+import { BookingSummary } from "./booking-summary";
+import { QuickSignup } from "./quick-signup";
+type Barber = { id: string; display_name: string };
 const demoNames = [
   "Acabamento (Pé)",
   "Barba Simples",
@@ -33,7 +39,7 @@ const demoNames = [
 ];
 export function Booking() {
   const [services, setServices] = useState<Service[]>([]);
-  const [barbers, setBarbers] = useState<{ id: string; display_name: string }[]>([]);
+  const [barbers, setBarbers] = useState<Barber[]>([]);
   const [hours, setHours] = useState<Hours[]>([]);
   const [settings, setSettings] = useState<Settings>({
     id: 1,
@@ -41,9 +47,9 @@ export function Booking() {
     min_notice: 30,
     booking_window: 30,
   });
-  const [service, setService] = useState<Service | null>(null);
-  const [selectedBarberId, setSelectedBarberId] = useState<string | null>(null);
-  const [assignedBarberName, setAssignedBarberName] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [barberId, setBarberId] = useState<string | null>(null);
+  const [assignedBarber, setAssignedBarber] = useState("");
   const [date, setDate] = useState(localDate());
   const [start, setStart] = useState("");
   const [step, setStep] = useState(1);
@@ -52,7 +58,14 @@ export function Booking() {
   const [slotLoading, setSlotLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const availabilityRequest = useRef({ id: 0 });
+  const [authenticated, setAuthenticated] = useState(false);
+  const requestTracker = useRef({ id: 0 });
+  const successDialog = useRef<HTMLDialogElement>(null);
+  const selected = useMemo(
+    () => services.filter((s) => selectedIds.includes(s.id)),
+    [services, selectedIds],
+  );
+  const total = useMemo(() => summarizeServices(selected), [selected]);
   useEffect(() => {
     let active = true;
     async function load() {
@@ -79,34 +92,35 @@ export function Booking() {
         if (s.error || h.error || c.error || b.error)
           throw s.error ?? h.error ?? c.error ?? b.error;
         if (!active) return;
+        const providers = (b.data ?? []) as Barber[];
         setServices(s.data ?? []);
-        setBarbers(b.data ?? []);
         setHours(h.data ?? []);
         setSettings(c.data);
+        setBarbers(providers);
+        setBarberId(providers.length === 1 ? providers[0].id : null);
         const saved = sessionStorage.getItem("seven-booking");
         if (saved) {
           try {
-            const v = JSON.parse(saved);
-            const found = s.data?.find((s) => s.id === v.service_id);
+            const value = JSON.parse(saved);
+            const ids = Array.isArray(value.service_ids)
+              ? value.service_ids
+              : [value.service_id];
+            const chosen = (s.data ?? []).filter((s) => ids.includes(s.id));
             if (
-              found &&
-              typeof v.start_at === "string" &&
-              new Date(v.start_at) > new Date()
+              chosen.length === ids.length &&
+              chosen.length &&
+              typeof value.start_at === "string" &&
+              new Date(value.start_at) > new Date()
             ) {
-              setService(found);
-              setStart(v.start_at);
-              setDate(localDate(new Date(v.start_at)));
-              setSelectedBarberId(
-                typeof v.barber_id === "string" &&
-                  b.data?.some(
-                    (barber: { id: string; display_name: string }) =>
-                      barber.id === v.barber_id,
-                  )
-                  ? v.barber_id
-                  : null,
-              );
-              setAssignedBarberName(
-                typeof v.barber_name === "string" ? v.barber_name : "",
+              setSelectedIds(chosen.map((s) => s.id));
+              setStart(value.start_at);
+              setDate(localDate(new Date(value.start_at)));
+              setBarberId(
+                providers.length === 1
+                  ? providers[0].id
+                  : providers.some((b) => b.id === value.barber_id)
+                    ? value.barber_id
+                    : null,
               );
               setStep(4);
             }
@@ -114,8 +128,8 @@ export function Booking() {
             sessionStorage.removeItem("seven-booking");
           }
         }
-      } catch (e) {
-        if (active) setError(readableError(e));
+      } catch (error) {
+        if (active) setError(readableError(error));
       } finally {
         if (active) setLoading(false);
       }
@@ -126,119 +140,149 @@ export function Booking() {
     };
   }, []);
   const refresh = useCallback(async () => {
-    if (!service || !configured()) return;
-    const requestId = ++availabilityRequest.current.id;
+    if (!total.count || !configured()) return;
+    const id = ++requestTracker.current.id;
     setSlotLoading(true);
     try {
-      const providers = selectedBarberId
-        ? barbers.filter((barber) => barber.id === selectedBarberId)
+      const providers = barberId
+        ? barbers.filter((b) => b.id === barberId)
         : barbers;
-      const busyByBarber = await Promise.all(
-        providers.map(async (barber) => {
+      const ranges = await Promise.all(
+        providers.map(async (b) => {
           const { data, error } = await browserDb().rpc("get_busy_ranges", {
             p_date: date,
-            p_barber_id: barber.id,
+            p_barber_id: b.id,
           });
           if (error) throw error;
           return (data ?? []) as Busy[];
         }),
       );
-      if (requestId !== availabilityRequest.current.id) return;
+      if (id !== requestTracker.current.id) return;
       setSlots(
         availableSlotsForAnyBarber(
           date,
-          service.duration_minutes,
+          total.duration_minutes,
           hours.find(
             (h) => h.weekday === new Date(`${date}T12:00:00-03:00`).getUTCDay(),
           ),
           settings,
-          busyByBarber,
+          ranges,
         ),
       );
-    } catch (e) {
-      if (requestId !== availabilityRequest.current.id) return;
-      setError(readableError(e));
-      setSlots([]);
+    } catch (error) {
+      if (id === requestTracker.current.id) {
+        setError(readableError(error));
+        setSlots([]);
+      }
     } finally {
-      if (requestId === availabilityRequest.current.id) setSlotLoading(false);
+      if (id === requestTracker.current.id) setSlotLoading(false);
     }
-  }, [date, service, hours, settings, barbers, selectedBarberId]);
+  }, [
+    date,
+    total.count,
+    total.duration_minutes,
+    hours,
+    settings,
+    barberId,
+    barbers,
+  ]);
   useEffect(() => {
     if (step !== 3) return;
-    const tracker = availabilityRequest.current;
+    const tracker = requestTracker.current;
     void refresh();
-    const interval = setInterval(() => void refresh(), 30000);
+    const timer = setInterval(() => void refresh(), 30000);
     return () => {
-      clearInterval(interval);
+      clearInterval(timer);
       tracker.id++;
     };
-  }, [refresh, step]);
+  }, [step, refresh]);
+  useEffect(() => {
+    if (step === 5) successDialog.current?.showModal();
+  }, [step]);
+  const selection = {
+    service_ids: selected.map((s) => s.id),
+    start_at: start,
+    barber_id: barberId,
+  };
+  function saveSelection() {
+    sessionStorage.setItem("seven-booking", JSON.stringify(selection));
+  }
+  function finish(result: { barber_name?: string | null }) {
+    sessionStorage.removeItem("seven-booking");
+    setAssignedBarber(result.barber_name ?? "");
+    setStep(5);
+    setError("");
+  }
+  async function create() {
+    const response = await fetch("/api/agendamentos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(selection),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error);
+    finish(result);
+  }
   async function confirm() {
-    if (!service || !start) return;
+    if (!total.count || !start) return;
     setBusy(true);
     setError("");
     try {
-      const db = browserDb();
-      sessionStorage.setItem(
-        "seven-booking",
-        JSON.stringify({
-          service_id: service.id,
-          start_at: start,
-          barber_id: selectedBarberId,
-        }),
-      );
-      const {
-        data: { user },
-      } = await db.auth.getUser();
-      if (!user) {
-        location.assign("/login?next=/");
-        return;
+      saveSelection();
+      if (!authenticated) {
+        const db = browserDb();
+        const {
+          data: { user },
+        } = await db.auth.getUser();
+        if (!user) {
+          setStep(6);
+          return;
+        }
+        const { data: profile } = await db
+          .from("profiles")
+          .select("nome,telefone,privacy_accepted_at,must_change_password")
+          .eq("id", user.id)
+          .single();
+        if (profile?.must_change_password) {
+          location.assign("/trocar-senha?required=1&next=/");
+          return;
+        }
+        if (
+          !profile?.nome ||
+          !profile.telefone ||
+          !profile.privacy_accepted_at
+        ) {
+          location.assign("/completar-cadastro?next=/");
+          return;
+        }
       }
-      const { data: p } = await db
-        .from("profiles")
-        .select("telefone,data_nascimento,privacy_accepted_at")
-        .eq("id", user.id)
-        .single();
-      if (!p?.telefone || !p.data_nascimento || !p.privacy_accepted_at) {
-        location.assign("/completar-cadastro?next=/");
-        return;
-      }
-      const response = await fetch("/api/agendamentos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          service_id: service.id,
-          start_at: start,
-          barber_id: selectedBarberId,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error);
-      sessionStorage.removeItem("seven-booking");
-      setAssignedBarberName(result.barber_name ?? "");
-      setStep(5);
-    } catch (e) {
-      setError(readableError(e));
+      await create();
+    } catch (error) {
+      setError(readableError(error));
     } finally {
       setBusy(false);
     }
   }
+  const barberLabel =
+    assignedBarber ||
+    barbers.find((b) => b.id === barberId)?.display_name ||
+    (barbers.length > 1 ? "Sem preferência" : "A definir");
+  const labels =
+    barbers.length > 1
+      ? ["Serviços", "Barbeiro", "Data e horário", "Confirmação"]
+      : ["Serviços", "Data e horário", "Confirmação"];
+  const visibleStep =
+    step >= 4
+      ? labels.length
+      : barbers.length > 1
+        ? step
+        : step === 1
+          ? 1
+          : step - 1;
   const max = new Date(`${localDate()}T12:00:00-03:00`);
   max.setUTCDate(max.getUTCDate() + settings.booking_window);
-  const selectedBarber = barbers.find(
-    (barber) => barber.id === selectedBarberId,
-  );
-  const barberLabel =
-    assignedBarberName ||
-    selectedBarber?.display_name ||
-    (barbers.length > 1 ? "Sem preferência" : "A definir");
-  const visibleStep = barbers.length > 1 ? step : step === 1 ? 1 : step - 1;
-  const stepLabels =
-    barbers.length > 1
-      ? ["Serviço", "Barbeiro", "Data e horário", "Confirmação"]
-      : ["Serviço", "Data e horário", "Confirmação"];
   return (
-    <>
+    <div className="booking-flow">
       <section className="booking-intro">
         <div>
           <p className="eyebrow">
@@ -253,7 +297,7 @@ export function Booking() {
           <p className="muted">
             Um corte bem feito muda o seu dia.
             <br />
-            Escolha seu serviço e deixe o resto com a gente.
+            Escolha seus serviços e deixe o resto com a gente.
           </p>
         </div>
         <div className="intro-seal">
@@ -265,8 +309,8 @@ export function Booking() {
       <div className="booking-layout">
         <section>
           <ol className="steps" aria-label="Etapas do agendamento">
-            {stepLabels.map((label, i) => (
-              <li key={label} className={visibleStep >= i + 1 ? "active" : ""}>
+            {labels.map((label, i) => (
+              <li className={visibleStep >= i + 1 ? "active" : ""} key={label}>
                 <span>{visibleStep > i + 1 ? <Check size={15} /> : i + 1}</span>
                 {label}
               </li>
@@ -285,14 +329,11 @@ export function Booking() {
           )}
           {step === 1 && (
             <>
-              <div className="row spaced section-head">
-                <div>
-                  <h2>O que vamos fazer hoje?</h2>
-                  <p className="muted">
-                    Escolha o serviço que combina com você.
-                  </p>
-                </div>
-                <span className="badge">01 / {stepLabels.length.toString().padStart(2, "0")}</span>
+              <div className="section-head">
+                <h2>O que vamos fazer hoje?</h2>
+                <p className="muted">
+                  Escolha um ou mais serviços para o seu atendimento.
+                </p>
               </div>
               {loading ? (
                 <div
@@ -301,33 +342,32 @@ export function Booking() {
                   aria-label="Carregando serviços"
                 >
                   {[1, 2, 3, 4].map((i) => (
-                    <div className="skeleton" key={i} />
+                    <div key={i} className="skeleton" />
                   ))}
                 </div>
-              ) : !services.length ? (
-                <div className="card empty">
-                  Nenhum serviço disponível no momento.
-                </div>
-              ) : (
+              ) : services.length ? (
                 <div className="service-grid">
-                  {services.map((s, i) => (
+                  {services.map((s) => (
                     <button
                       key={s.id}
-                      className={`service-card ${service?.id === s.id ? "selected" : ""}`}
+                      className={`service-card ${selectedIds.includes(s.id) ? "selected" : ""}`}
+                      aria-pressed={selectedIds.includes(s.id)}
                       onClick={() => {
-                        setService(s);
+                        setSelectedIds((ids) =>
+                          ids.includes(s.id)
+                            ? ids.filter((id) => id !== s.id)
+                            : [...ids, s.id],
+                        );
                         setStart("");
-                        setSelectedBarberId(null);
-                        setAssignedBarberName("");
+                        setError("");
                       }}
-                      aria-pressed={service?.id === s.id}
                     >
                       <div className="row spaced">
                         <span className="service-icon">
                           <Scissors size={21} />
                         </span>
                         <span className="radio-mark">
-                          {service?.id === s.id && <Check size={13} />}
+                          {selectedIds.includes(s.id) && <Check size={13} />}
                         </span>
                       </div>
                       <h3>{s.name}</h3>
@@ -338,12 +378,16 @@ export function Booking() {
                         </span>
                         <strong>{money(s.price)}</strong>
                       </div>
-                      {i === 6 && (
-                        <span className="popular">O combo completo</span>
-                      )}
                     </button>
                   ))}
                 </div>
+              ) : (
+                <div className="card empty">
+                  Nenhum serviço disponível no momento.
+                </div>
+              )}
+              {configured() && !loading && !barbers.length && (
+                <p className="error">Nenhum barbeiro disponível no momento.</p>
               )}
               <div className="booking-actions">
                 <p className="muted">
@@ -351,13 +395,18 @@ export function Booking() {
                 </p>
                 <button
                   className="button"
-                  disabled={!service || !configured() || !barbers.length}
+                  disabled={
+                    !total.count ||
+                    total.count > 20 ||
+                    !configured() ||
+                    !barbers.length
+                  }
                   onClick={() => {
-                    setError("");
                     setStart("");
+                    setError("");
                     if (barbers.length > 1) setStep(2);
                     else {
-                      setSelectedBarberId(barbers[0]?.id ?? null);
+                      setBarberId(barbers[0].id);
                       setStep(3);
                     }
                   }}
@@ -367,46 +416,52 @@ export function Booking() {
               </div>
             </>
           )}
-          {step === 2 && (
+          {step === 2 && barbers.length > 1 && (
             <>
               <h2>Escolha o barbeiro</h2>
               <p className="muted">
                 Selecione quem vai atender você ou deixe a equipe escolher.
               </p>
               <div className="service-grid barber-grid">
-                {barbers.map((barber) => (
+                {barbers.map((b) => (
                   <button
-                    className={`service-card ${selectedBarberId === barber.id ? "selected" : ""}`}
-                    key={barber.id}
+                    key={b.id}
+                    className={`service-card ${barberId === b.id ? "selected" : ""}`}
+                    aria-pressed={barberId === b.id}
                     onClick={() => {
-                      setSelectedBarberId(barber.id);
+                      setBarberId(b.id);
                       setStart("");
                     }}
-                    aria-pressed={selectedBarberId === barber.id}
                   >
-                    <span className="service-icon"><UserRound size={21} /></span>
-                    <h3>{barber.display_name}</h3>
+                    <span className="service-icon">
+                      <UserRound size={21} />
+                    </span>
+                    <h3>{b.display_name}</h3>
                     <span className="muted">Escolher este barbeiro</span>
                   </button>
                 ))}
                 <button
-                  className={`service-card ${selectedBarberId === null ? "selected" : ""}`}
+                  className={`service-card ${barberId === null ? "selected" : ""}`}
+                  aria-pressed={barberId === null}
                   onClick={() => {
-                    setSelectedBarberId(null);
+                    setBarberId(null);
                     setStart("");
                   }}
-                  aria-pressed={selectedBarberId === null}
                 >
-                  <span className="service-icon"><UserRound size={21} /></span>
+                  <span className="service-icon">
+                    <UserRound size={21} />
+                  </span>
                   <h3>Sem preferência</h3>
-                  <span className="muted">A equipe encontra o melhor horário.</span>
+                  <span className="muted">
+                    A equipe encontra o melhor horário.
+                  </span>
                 </button>
               </div>
               <div className="booking-actions">
                 <button className="quiet row" onClick={() => setStep(1)}>
                   <ArrowLeft size={16} /> Voltar
                 </button>
-                <button className="button" disabled={selectedBarberId === null && !barbers.length} onClick={() => setStep(3)}>
+                <button className="button" onClick={() => setStep(3)}>
                   Escolher horário <ArrowRight size={17} />
                 </button>
               </div>
@@ -416,7 +471,8 @@ export function Booking() {
             <>
               <h2>Reserve seu momento</h2>
               <p className="muted">
-                {barberLabel} · horários no fuso de Brasília. O serviço ocupa {service?.duration_minutes} minutos.
+                {barberLabel} · horários no fuso de Brasília. Seus serviços
+                ocupam {total.duration_minutes} minutos.
               </p>
               <label className="date-picker">
                 Escolha o dia
@@ -425,8 +481,8 @@ export function Booking() {
                   min={localDate()}
                   max={localDate(max)}
                   value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
+                  onChange={(event) => {
+                    setDate(event.target.value);
                     setStart("");
                     setError("");
                   }}
@@ -436,25 +492,26 @@ export function Booking() {
                 {Array.from(
                   { length: Math.min(settings.booking_window + 1, 31) },
                   (_, i) => {
-                    const d = new Date(`${localDate()}T12:00:00-03:00`);
-                    d.setUTCDate(d.getUTCDate() + i);
-                    const value = localDate(d);
+                    const day = new Date(`${localDate()}T12:00:00-03:00`);
+                    day.setUTCDate(day.getUTCDate() + i);
+                    const value = localDate(day);
                     return (
                       <button
-                        className={date === value ? "chosen" : ""}
                         key={value}
+                        className={date === value ? "chosen" : ""}
                         onClick={() => {
                           setDate(value);
                           setStart("");
+                          setError("");
                         }}
                       >
                         <small>
                           {new Intl.DateTimeFormat("pt-BR", {
                             weekday: "short",
                             timeZone: "America/Sao_Paulo",
-                          }).format(d)}
+                          }).format(day)}
                         </small>
-                        <strong>{d.getUTCDate()}</strong>
+                        <strong>{day.getUTCDate()}</strong>
                       </button>
                     );
                   },
@@ -465,13 +522,13 @@ export function Booking() {
                 <p role="status">Consultando a agenda…</p>
               ) : slots.length ? (
                 <div className="time-grid">
-                  {slots.map((s) => (
+                  {slots.map((slot) => (
                     <button
-                      key={s}
-                      className={start === s ? "chosen" : ""}
-                      onClick={() => setStart(s)}
+                      key={slot}
+                      className={start === slot ? "chosen" : ""}
+                      onClick={() => setStart(slot)}
                     >
-                      {timeLabel(s)}
+                      {timeLabel(slot)}
                     </button>
                   ))}
                 </div>
@@ -481,7 +538,10 @@ export function Booking() {
                 </div>
               )}
               <div className="booking-actions">
-                <button className="quiet row" onClick={() => setStep(barbers.length > 1 ? 2 : 1)}>
+                <button
+                  className="quiet row"
+                  onClick={() => setStep(barbers.length > 1 ? 2 : 1)}
+                >
                   <ArrowLeft size={16} /> Voltar
                 </button>
                 <button
@@ -498,96 +558,84 @@ export function Booking() {
             <>
               <h2>Tudo certo para o seu próximo corte?</h2>
               <p className="muted">
-                Revise os detalhes antes de enviar sua reserva.
+                Confira os detalhes no resumo. O agendamento fica pendente até a
+                confirmação da barbearia.
               </p>
-              <div className="card confirmation">
-                <span className="service-icon">
-                  <Scissors />
-                </span>
-                <h2>{service?.name}</h2>
-                <p>
-                  {dateLabel(start)} · {timeLabel(start)}
-                </p>
-                <p className="muted">
-                  Duração de {service?.duration_minutes} minutos
-                </p>
-                <p>Barbeiro: {barberLabel}</p>
-                <strong>{money(service?.price ?? 0)}</strong>
-                <p className="muted">
-                  O agendamento fica pendente até a confirmação da barbearia.
-                </p>
-              </div>
               <div className="booking-actions">
-                <button className="quiet row" onClick={() => setStep(3)}>
+                <button
+                  className="quiet row"
+                  disabled={busy}
+                  onClick={() => {
+                    setError("");
+                    setStep(3);
+                  }}
+                >
                   <ArrowLeft size={16} /> Alterar horário
                 </button>
-                <button disabled={busy} className="button" onClick={confirm}>
+                <button className="button" disabled={busy} onClick={confirm}>
                   {busy ? "Enviando…" : "Confirmar agendamento"}
                   <Check size={17} />
                 </button>
               </div>
             </>
           )}
+          {step === 6 && (
+            <QuickSignup
+              booking={selection}
+              onBack={() => setStep(4)}
+              onComplete={async (result) => {
+                if (result.must_change_password) {
+                  location.assign("/trocar-senha?required=1&next=/");
+                  return;
+                }
+                setAuthenticated(true);
+                window.dispatchEvent(new Event("seven-auth-changed"));
+                if (result.appointment) {
+                  finish(result.appointment);
+                  return;
+                }
+                setStep(4);
+                if (result.booking_error) {
+                  setError(result.booking_error);
+                  return;
+                }
+                try {
+                  setBusy(true);
+                  await create();
+                } catch (error) {
+                  setError(readableError(error));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            />
+          )}
           {step === 5 && (
-            <div className="card confirmation">
-              <Check size={42} color="#22c55e" />
-              <h2>Seu horário foi reservado!</h2>
-              <p>Barbeiro: {assignedBarberName || barberLabel}</p>
-              <p>
-                A barbearia recebeu o pedido. Acompanhe a confirmação em seus
-                agendamentos.
-              </p>
-              <a className="button" href="/meus-agendamentos">
+            <>
+              <h2>Agendamento enviado</h2>
+              <Link className="button" href="/meus-agendamentos">
                 Ver meus agendamentos
-              </a>
-            </div>
+              </Link>
+            </>
           )}
         </section>
-        <aside className="booking-sidebar">
-          <div className="card summary">
-            <p className="eyebrow">SEU AGENDAMENTO</p>
-            <div className="summary-icon">
-              <Scissors size={26} />
-            </div>
-            <h3>{service?.name ?? "Um tempo para você"}</h3>
-            <p className="muted">
-              {service
-                ? `${service.duration_minutes} minutos de cuidado.`
-                : "Selecione um serviço para começar sua reserva."}
-            </p>
-            <div className="summary-line">
-              <span>Serviço</span>
-              <strong>{service ? money(service.price) : "—"}</strong>
-            </div>
-            <div className="summary-line">
-              <span>Barbeiro</span>
-              <strong>{barberLabel}</strong>
-            </div>
-            <div className="summary-line">
-              <span>Data e horário</span>
-              <strong>
-                {start
-                  ? `${new Date(start).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })} · ${timeLabel(start)}`
-                  : "A escolher"}
-              </strong>
-            </div>
-            <div className="summary-line total">
-              <span>Total</span>
-              <strong>{service ? money(service.price) : "—"}</strong>
-            </div>
-            <p className="summary-note">Pagamento presencial na barbearia.</p>
-          </div>
-          <div className="care-note">
-            <Star size={20} />
-            <h3>
-              Mais que um corte.
-              <br />
-              Uma experiência.
-            </h3>
-            <p>Atendimento com hora marcada e atenção exclusiva para você.</p>
-          </div>
-        </aside>
+        <BookingSummary
+          services={selected}
+          barber={barberLabel}
+          start={start}
+        />
       </div>
-    </>
+      <dialog
+        ref={successDialog}
+        className="card booking-success"
+        aria-label="Agendamento enviado"
+      >
+        <Check size={40} color="#22c55e" />
+        <p>{BOOKING_SUCCESS_MESSAGE}</p>
+        <Link className="button full" href="/meus-agendamentos">
+          Ver meus agendamentos
+        </Link>
+      </dialog>
+    </div>
   );
 }

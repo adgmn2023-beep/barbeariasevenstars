@@ -210,7 +210,7 @@ export function Dashboard() {
       for (let offset = 0; ; offset += 1000) {
         let query = db
           .from("appointments")
-          .select("*")
+          .select("*,appointment_services(*)")
           .gte("booking_date", from)
           .lte("booking_date", to);
         if (barberId) query = query.eq("barber_id", barberId);
@@ -257,14 +257,20 @@ export function Dashboard() {
     setTo(today);
   }
   const completed = items.filter((a) => a.status === "concluido");
-  const revenue = completed.reduce((sum, a) => sum + Number(a.price), 0);
+  const snapshotRevenue = (a: Appointment) =>
+    (a.appointment_services ?? []).reduce(
+      (sum, service) => sum + Math.round(Number(service.price) * 100),
+      0,
+    ) / 100;
+  const revenue = completed.reduce((sum, a) => sum + snapshotRevenue(a), 0);
   const status = Object.entries(statusLabels).map(([key, name]) => ({
     name,
     total: items.filter((a) => a.status === key).length,
   }));
   const services = Object.entries(
     items.reduce<Record<string, number>>((acc, a) => {
-      acc[a.service_name] = (acc[a.service_name] ?? 0) + 1;
+      for (const service of a.appointment_services ?? [])
+        acc[service.name] = (acc[service.name] ?? 0) + 1;
       return acc;
     }, {}),
   )
@@ -272,7 +278,7 @@ export function Dashboard() {
     .sort((a, b) => b.total - a.total);
   const daily = Object.entries(
     completed.reduce<Record<string, number>>((acc, a) => {
-      acc[a.booking_date] = (acc[a.booking_date] ?? 0) + Number(a.price);
+      acc[a.booking_date] = (acc[a.booking_date] ?? 0) + snapshotRevenue(a);
       return acc;
     }, {}),
   )

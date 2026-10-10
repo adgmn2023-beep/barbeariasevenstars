@@ -33,7 +33,10 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/rest/v1/rpc/list_active_barbers", (route) =>
     route.fulfill({
       json: [
-        { id: "44444444-4444-4444-8444-444444444444", display_name: "Barbeiro A" },
+        {
+          id: "44444444-4444-4444-8444-444444444444",
+          display_name: "Barbeiro A",
+        },
       ],
     }),
   );
@@ -82,26 +85,96 @@ test("autenticação, política e proteção do painel", async ({ page }) => {
   await expect(page.getByLabel("Telefone com DDD")).toHaveValue(
     "(11) 99999-9999",
   );
+  const popupPromise = page.waitForEvent("popup");
   await page
     .getByRole("link", { name: "política de privacidade", exact: true })
     .click();
+  const policy = await popupPromise;
   await expect(
-    page.getByRole("heading", { name: "Política de privacidade" }),
+    policy.getByRole("heading", { name: "Política de privacidade" }),
   ).toBeVisible();
+  await policy.close();
   await page.goto("/painelinterno");
   await expect(page).toHaveURL(/\/login/);
 });
-test("pula a escolha de barbeiro quando há apenas um ativo", async ({ page }) => {
+test("pula a escolha de barbeiro quando há apenas um ativo", async ({
+  page,
+}) => {
   await page.goto("/");
   test.skip(
-    await page.getByText("Em breve, agendamentos por aqui.", { exact: false }).isVisible(),
+    await page
+      .getByText("Em breve, agendamentos por aqui.", { exact: false })
+      .isVisible(),
     "Este cenário requer configuração pública Supabase.",
   );
   await page.getByRole("button", { name: /Corte Simples/ }).click();
   await page.getByRole("button", { name: "Continuar" }).click();
   await expect(page.getByLabel("Escolha o dia")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Escolha o barbeiro" })).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Escolha o barbeiro" }),
+  ).toHaveCount(0);
 });
+test("telefone duplicado abre login por telefone com a seleção preservada", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(12, 0, 0, 0);
+    sessionStorage.setItem(
+      "seven-booking",
+      JSON.stringify({
+        service_ids: ["33333333-3333-4333-8333-333333333333"],
+        barber_id: "44444444-4444-4444-8444-444444444444",
+        start_at: tomorrow.toISOString(),
+      }),
+    );
+  });
+  await page.route("**/api/auth/cadastro-rapido", (route) =>
+    route.fulfill({
+      status: 409,
+      json: {
+        code: "PHONE_EXISTS",
+        error: "Esse telefone já tem conta. Entre com sua senha.",
+      },
+    }),
+  );
+  await page.route("**/api/auth/telefone", (route) =>
+    route.fulfill({ json: { ok: true, must_change_password: false } }),
+  );
+  await page.route("**/api/agendamentos", (route) => {
+    expect(route.request().postDataJSON().service_ids).toEqual([
+      "33333333-3333-4333-8333-333333333333",
+    ]);
+    return route.fulfill({
+      status: 201,
+      json: { id: "appointment", barber_name: "Barbeiro A" },
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Confirmar agendamento" }).click();
+  await page.getByLabel("Nome completo").fill("Cliente Existente");
+  await page.getByLabel("Telefone com DDD").fill("11999999999");
+  await page.getByLabel("Senha", { exact: true }).fill("SenhaTeste123!");
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Criar conta e agendar" }).click();
+  await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+    "Esse telefone já tem conta. Entre com sua senha.",
+  );
+  await expect(
+    page.getByRole("heading", { name: "Entre com seu telefone" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Telefone com DDD")).toHaveValue(
+    "(11) 99999-9999",
+  );
+  await expect(page.getByLabel("Senha", { exact: true })).toHaveValue("");
+  await page.getByLabel("Senha", { exact: true }).fill("SenhaTeste123!");
+  await page.getByRole("button", { name: "Entrar e continuar" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Agendamento enviado" }),
+  ).toBeVisible();
+});
+
 test("manifesto, service worker e tela offline", async ({
   page,
   context,

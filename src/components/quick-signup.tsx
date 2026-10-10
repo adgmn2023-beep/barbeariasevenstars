@@ -88,7 +88,7 @@ export function QuickSignup({
       <h2>{mode === "signup" ? "Seus dados" : "Entre com seu telefone"}</h2>
       <p className="muted">
         {mode === "signup"
-          ? "Informe seus dados para concluir. Sua seleção já está reservada nesta tela."
+          ? "Informe seus dados para concluir. Sua seleção continua salva nesta tela."
           : "Use a senha da sua conta para concluir o agendamento."}
       </p>
       <form onSubmit={submit}>

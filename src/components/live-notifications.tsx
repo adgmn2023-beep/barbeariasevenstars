@@ -16,6 +16,7 @@ export function LiveNotifications() {
         data: { user },
       } = await db.auth.getUser();
       if (!user || disposed) return;
+      if (channel) void db.removeChannel(channel);
       channel = db
         .channel("client-toast")
         .on(
@@ -41,7 +42,9 @@ export function LiveNotifications() {
         .subscribe();
     }
     void listen();
+    window.addEventListener("seven-auth-changed", listen);
     return () => {
+      window.removeEventListener("seven-auth-changed", listen);
       disposed = true;
       if (channel) void db.removeChannel(channel);
     };

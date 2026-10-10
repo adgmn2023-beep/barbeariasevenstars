@@ -17,6 +17,12 @@ export type Profile = {
   role: "client" | "barber" | "admin" | "master";
 };
 export type Appointment = {
+  appointment_services?: {
+    service_id: string | null;
+    name: string;
+    price: number;
+    duration_minutes: number;
+  }[];
   id: string;
   client_id: string | null;
   barber_id: string | null;
