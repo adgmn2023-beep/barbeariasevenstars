@@ -1,10 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 export async function proxy(request: NextRequest) {
-  if (request.nextUrl.pathname.startsWith('/api/') && !['GET','HEAD','OPTIONS'].includes(request.method)) {
-    const origin=request.headers.get('origin');
-    const expected=process.env.NEXT_PUBLIC_SITE_URL || request.nextUrl.origin;
-    if(origin && origin!==request.nextUrl.origin && origin!==expected) return NextResponse.json({error:'Origem da solicitação não permitida.'},{status:403});
+  if (
+    request.nextUrl.pathname.startsWith("/api/") &&
+    !["GET", "HEAD", "OPTIONS"].includes(request.method)
+  ) {
+    const origin = request.headers.get("origin");
+    const expected = process.env.NEXT_PUBLIC_SITE_URL || request.nextUrl.origin;
+    if (origin && origin !== request.nextUrl.origin && origin !== expected)
+      return NextResponse.json(
+        { error: "Origem da solicitação não permitida." },
+        { status: 403 },
+      );
   }
   let response = NextResponse.next({ request });
   const protectedPage = [
@@ -59,6 +66,6 @@ export async function proxy(request: NextRequest) {
 }
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|icons/|logo.png|sw.js|manifest.webmanifest).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icons/|logo.png|sw.js|manifest.webmanifest|painelinterno/manifest.webmanifest).*)",
   ],
 };
