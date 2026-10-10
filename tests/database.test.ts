@@ -306,6 +306,19 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     );
   });
 
+  it("barbeiro desativado perde acesso RLS mesmo com sessão ainda válida", async () => {
+    await asOwner();
+    await db.exec(`update barbers set active=false where id='${ids.barberA}'`);
+    await asUser(ids.barberAProfile);
+    expect((await db.query("select * from appointments")).rows).toHaveLength(0);
+    await expect(
+      db.query(
+        "insert into blocked_slots(barber_id,start_at,end_at) values($1,$2,$3)",
+        [ids.barberA, `${day}T12:00:00-03:00`, `${day}T13:00:00-03:00`],
+      ),
+    ).rejects.toThrow(/row-level security/i);
+  });
+
   it("barbeiro lê profiles de clientes próprios, mas não de outros barbeiros", async () => {
     await asUser(ids.alice);
     await book("09:00", ids.barberA);
@@ -423,6 +436,10 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
         )
       ).rows.map((row) => row.tablename),
     ).toContain("appointments");
+    const replicaIdentity = await db.query<{ relreplident: string }>(
+      "select relreplident from pg_class where oid='public.appointments'::regclass",
+    );
+    expect(replicaIdentity.rows[0].relreplident).toBe("f");
   });
 
   it("admin/master gerencia tudo e desativação exige remanejamento ou cancelamento", async () => {

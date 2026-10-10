@@ -17,6 +17,14 @@ end $$;
 create trigger appointment_barber_name_snapshot
   before insert or update of barber_id on public.appointments
   for each row execute function public.snapshot_appointment_barber_name();
+alter table public.appointments replica identity full;
+
+create or replace function public.current_barber_id() returns uuid
+language sql stable security definer set search_path=public as $$
+  select b.id from public.barbers b
+  where b.profile_id=auth.uid() and b.active
+  limit 1
+$$;
 
 create table public.audit_log(
   id uuid primary key default gen_random_uuid(),

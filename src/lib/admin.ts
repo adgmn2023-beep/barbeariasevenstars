@@ -1,12 +1,10 @@
 import "server-only";
 import { redirect } from "next/navigation";
 import { privilegedDb, serverDb } from "./supabase/server";
-export async function requireStaff() {
-  const db = await serverDb();
-  const {
-    data: { user },
-  } = await db.auth.getUser();
-  if (!user) throw new Error("Entre na sua conta para continuar.");
+async function staffContext(
+  db: Awaited<ReturnType<typeof serverDb>>,
+  user: { id: string },
+) {
   const { data, error } = await db
     .from("profiles")
     .select("role")
@@ -27,6 +25,14 @@ export async function requireStaff() {
     barberId = barber.id;
   }
   return { db, user, role, barberId };
+}
+export async function requireStaff() {
+  const db = await serverDb();
+  const {
+    data: { user },
+  } = await db.auth.getUser();
+  if (!user) throw new Error("Entre na sua conta para continuar.");
+  return staffContext(db, user);
 }
 export async function requireAdmin() {
   const context = await requireStaff();

@@ -1,2 +1,6 @@
--- Após se cadastrar, substitua o e-mail e execute no SQL Editor.
-update public.profiles set role='admin' where email='dono@example.com';
+-- Bootstrap único: cadastre primeiro a conta do responsável e troque o e-mail abaixo.
+-- Execute uma vez no SQL Editor para promover a primeira conta a master.
+update public.profiles
+set role='master'
+where lower(email)=lower('master@example.com')
+	and role='client';

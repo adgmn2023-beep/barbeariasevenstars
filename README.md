@@ -1,6 +1,6 @@
 # Seven Stars Barbershop
 
-Sistema de agendamento para **um barbeiro e uma agenda**, em português do Brasil. Next.js App Router, TypeScript, Tailwind CSS, Supabase Auth/Postgres/Realtime, Recharts e Web Push. Sem pagamentos online, múltiplos barbeiros, WhatsApp automático ou publicação em lojas.
+Sistema de agendamento para uma barbearia com **múltiplos barbeiros e agendas individuais**, em português do Brasil. Next.js App Router, TypeScript, Tailwind CSS, Supabase Auth/Postgres/Realtime, Recharts e Web Push. Sem pagamentos online, WhatsApp automático ou publicação em lojas.
 
 ## Executar localmente
 
@@ -49,9 +49,9 @@ Na verificação desta entrega, `npm audit --omit=dev` retornou zero vulnerabili
 
 1. Crie um projeto no plano Free e guarde a senha do banco.
 2. Em Project Settings → API, copie a URL e a chave pública `anon`. A chave `service_role` vai **somente** em `SUPABASE_SERVICE_ROLE_KEY`, no servidor. Nunca adicione prefixo `NEXT_PUBLIC_` a ela.
-3. Abra o SQL Editor e execute os arquivos de `supabase/migrations/` em ordem numérica, uma única vez cada. Alternativamente use a CLI Supabase autenticada: `supabase link --project-ref SEU_PROJECT_REF` e `supabase db push`.
+3. Abra o SQL Editor e execute os arquivos de `supabase/migrations/` em ordem numérica, uma única vez cada, incluindo `202610100004_multi_barber_roles.sql` e `202610100005_team_password_audit.sql`. Alternativamente use a CLI Supabase autenticada: `supabase link --project-ref SEU_PROJECT_REF` e `supabase db push`.
 4. Confirme que `appointments` e `blocked_slots` estão na publicação `supabase_realtime`. A migração já as adiciona.
-5. Cadastre o dono pela interface e execute `supabase/scripts/promote_admin.sql`, substituindo o e-mail. Ninguém vira admin por metadados de cadastro nem pela interface.
+5. Cadastre a conta do responsável e confirme o e-mail. Edite `supabase/scripts/promote_admin.sql` com esse e-mail e execute uma única vez no SQL Editor para promover a primeira conta a `master`. O master entra em Painel interno → Configurações → Equipe e cria o dono como `admin`; a senha provisória aparece uma única vez e exige troca no primeiro login. Depois disso, o dono/admin cria contas `barber` pela tela Equipe. Admin comum não pode criar nem promover outro admin. Cadastro público nunca cria papel de equipe.
 
 Serviços iniciais têm **40 minutos e R$ 0,00**, conforme o pedido. Antes de divulgar o site, ajuste preços, durações, expediente, almoço e regras em `/painelinterno`. Valores anteriores permanecem nos snapshots dos agendamentos.
 
@@ -100,9 +100,9 @@ Gere as chaves uma única vez:
 npm run vapid
 ```
 
-Configure as três variáveis VAPID no ambiente local e na Vercel. Cada usuário ativa notificações no perfil. O admin usa o mesmo perfil para receber novos pedidos. HTTPS é obrigatório em produção; localhost funciona para desenvolvimento.
+Configure as três variáveis VAPID no ambiente local e na Vercel. Cada usuário ativa notificações no perfil. Admin/master e barbeiros podem ativar push no perfil; novo pedido notifica o responsável e admin/master. HTTPS é obrigatório em produção; localhost funciona para desenvolvimento.
 
-O painel exige o clique em **Ativar alertas sonoros** a cada abertura. O clique libera Web Audio e voz. A fila nativa de `speechSynthesis` evita sobreposição; IDs anunciados e lembretes ficam em `sessionStorage` para não repetir na reconexão. A voz é pt-BR quando disponível no sistema operacional.
+O painel exige o clique em **Ativar alertas sonoros** a cada abertura. O clique libera Web Audio e voz. A fila nativa de `speechSynthesis` evita sobreposição; IDs anunciados e lembretes ficam em `sessionStorage` para não repetir na reconexão. A voz é pt-BR quando disponível no sistema operacional. Barbeiros veem e ouvem apenas os agendamentos atribuídos à própria agenda; admin/master podem filtrar Agenda e Dashboard por barbeiro. Push de novo agendamento é enviado ao barbeiro responsável e aos admins/master.
 
 O intervalo de lembretes é definido em um só lugar: `PENDING_REMINDER_MS` em `src/lib/notification-config.ts` (10 minutos). A checagem ocorre a cada 30 segundos, calcula os ciclos desde `created_at` e continua enquanto houver pendências. Realtime reconecta pelo SDK; polling de 30 s cobre interrupções. Wake Lock é solicitado e readquirido quando a aba volta a ficar visível, com aviso quando indisponível. Navegadores podem suspender timers e áudio em segundo plano; mantenha o painel aberto e use push como complemento.
 
@@ -135,7 +135,8 @@ Não há configuração de contas externas, segredos ou publicação automática
 - Criação exclusivamente pela RPC `create_appointment`, com usuário autenticado e cadastro completo; INSERT direto negado.
 - Lock transacional único serializa reservas, bloqueios e mudanças de regras. Constraint de exclusão impede sobreposição de pendente, confirmado e concluído. Índice único parcial limita a um agendamento por cliente/dia nesses status.
 - Pendentes seguram horário. Cancelamento com motivo de no mínimo três caracteres libera a reserva. Transições: pendente → confirmado/cancelado; confirmado → concluído/faltou apenas após `end_at`. Confirmados não podem ser cancelados, conforme a regra solicitada.
-- RLS em todas as tabelas, leitura pública sem dados pessoais apenas para serviços/configuração e RPC de intervalos. Clientes leem os próprios agendamentos/perfil; role e identidade não são editáveis pelo cliente.
+- RLS em todas as tabelas, leitura pública sem dados pessoais apenas para serviços/configuração, barbeiros ativos e RPCs de disponibilidade. Clientes leem os próprios agendamentos/perfil; barbeiros leem e atualizam somente os próprios agendamentos e perfis dos clientes que atendem; admin/master gerenciam tudo. Barbeiro desativado perde acesso pelo Auth, painel e `current_barber_id()` mesmo com sessão antiga. O papel e a identidade não são editáveis pelo cliente.
+- Papéis: `client`, `barber`, `admin` e `master`. O primeiro master é promovido uma única vez pelo script `supabase/scripts/promote_admin.sql`; o master cria o dono como admin na tela Equipe. Admin comum cria barbeiros; master cria admin ou barbeiro. Usuários da equipe recebem senha provisória e precisam trocá-la no primeiro login.
 - Snapshot de nome, valor e duração preserva o histórico; receita soma somente concluídos.
 - Exclusão de conta é transacional no banco. Apaga usuário Auth, perfil, assinaturas e reservas não concluídas; os concluídos perdem o vínculo pessoal. A anonimização não remove backups históricos já realizados pelo provedor, sujeitos à retenção dele.
 
