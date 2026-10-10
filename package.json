@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "icons": "node scripts/icons.mjs",
-    "format": "prettier --write src tests scripts supabase *.json *.ts *.mjs README.md"
+    "format": "prettier --write src tests scripts *.json *.ts *.mjs README.md",
+    "test:browser": "playwright test",
+    "vapid": "node scripts/generate-vapid.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.8.0",
