@@ -30,6 +30,13 @@ test.beforeEach(async ({ page }) => {
       json: { id: 1, slot_step: 20, min_notice: 30, booking_window: 30 },
     }),
   );
+  await page.route("**/rest/v1/rpc/list_active_barbers", (route) =>
+    route.fulfill({
+      json: [
+        { id: "44444444-4444-4444-8444-444444444444", display_name: "Barbeiro A" },
+      ],
+    }),
+  );
 });
 test("página inicial, serviços e seleção sem transbordar", async ({ page }) => {
   const errors: string[] = [];
@@ -45,7 +52,7 @@ test("página inicial, serviços e seleção sem transbordar", async ({ page }) 
   await expect(
     page.getByRole("button", { name: /Corte Simples/ }),
   ).toHaveAttribute("aria-pressed", "true");
-  const button = page.getByRole("button", { name: "Escolher horário" });
+  const button = page.getByRole("button", { name: "Continuar" });
   if (
     await page
       .getByText("Em breve, agendamentos por aqui.", { exact: false })
@@ -83,6 +90,17 @@ test("autenticação, política e proteção do painel", async ({ page }) => {
   ).toBeVisible();
   await page.goto("/painelinterno");
   await expect(page).toHaveURL(/\/login/);
+});
+test("pula a escolha de barbeiro quando há apenas um ativo", async ({ page }) => {
+  await page.goto("/");
+  test.skip(
+    await page.getByText("Em breve, agendamentos por aqui.", { exact: false }).isVisible(),
+    "Este cenário requer configuração pública Supabase.",
+  );
+  await page.getByRole("button", { name: /Corte Simples/ }).click();
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await expect(page.getByLabel("Escolha o dia")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Escolha o barbeiro" })).toHaveCount(0);
 });
 test("manifesto, service worker e tela offline", async ({
   page,

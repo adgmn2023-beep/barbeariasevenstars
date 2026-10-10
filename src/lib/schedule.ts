@@ -85,3 +85,19 @@ export function availableSlots(
   }
   return result;
 }
+export function availableSlotsForAnyBarber(
+  date: string,
+  duration: number,
+  hours: Hours | undefined,
+  settings: Settings,
+  busyByBarber: Busy[][],
+  now = new Date(),
+): string[] {
+  return [
+    ...new Set(
+      busyByBarber.flatMap((busy) =>
+        availableSlots(date, duration, hours, settings, busy, now),
+      ),
+    ),
+  ].sort();
+}

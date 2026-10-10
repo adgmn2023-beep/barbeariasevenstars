@@ -19,6 +19,8 @@ export type Profile = {
 export type Appointment = {
   id: string;
   client_id: string | null;
+  barber_id: string | null;
+  barber_name: string | null;
   service_name: string;
   price: number;
   duration_minutes: number;

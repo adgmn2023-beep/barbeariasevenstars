@@ -82,6 +82,7 @@ export function Appointments() {
               <p>
                 {dateLabel(a.start_at)} às {timeLabel(a.start_at)}
               </p>
+              <p className="muted">Barbeiro: {a.barber_name ?? "Não informado"}</p>
               <p className="muted">
                 {a.duration_minutes} minutos · {money(a.price)}
               </p>

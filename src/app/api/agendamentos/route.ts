@@ -17,19 +17,39 @@ export async function POST(request: Request) {
     const { data, error } = await db.rpc("create_appointment", {
       p_service_id: body.service_id,
       p_start_at: body.start_at,
+      p_barber_id: body.barber_id ?? null,
     });
     if (error) throw error;
+    const { data: created, error: createdError } = await db
+      .from("appointments")
+      .select("barber_id,barber_name")
+      .eq("id", data)
+      .single();
+    if (createdError) throw createdError;
     try {
-      const { data: admins, error: adminError } = await privilegedDb()
+      const privileged = privilegedDb();
+      const [{ data: admins, error: adminError }, { data: barber, error: barberError }] =
+        await Promise.all([
+          privileged
         .from("profiles")
         .select("id")
-        .eq("role", "admin");
-      if (adminError) throw adminError;
+            .in("role", ["admin", "master"]),
+          privileged
+            .from("barbers")
+            .select("profile_id")
+            .eq("id", created.barber_id)
+            .single(),
+        ]);
+      if (adminError || barberError) throw adminError ?? barberError;
+      const recipientIds = [
+        ...(admins ?? []).map((admin) => admin.id),
+        barber.profile_id,
+      ];
       await sendPush(
-        (admins ?? []).map((a) => a.id),
+        [...new Set(recipientIds)],
         {
           title: "Novo agendamento",
-          body: "Há um novo agendamento aguardando confirmação.",
+          body: `Há um novo agendamento com ${created.barber_name ?? "a equipe"} aguardando confirmação.`,
           url: "/painelinterno",
         },
       );
@@ -38,7 +58,10 @@ export async function POST(request: Request) {
         "Falha ao notificar administradores sobre novo agendamento.",
       );
     }
-    return NextResponse.json({ id: data }, { status: 201 });
+    return NextResponse.json(
+      { id: data, barber_id: created.barber_id, barber_name: created.barber_name },
+      { status: 201 },
+    );
   } catch (e) {
     return NextResponse.json({ error: readableError(e) }, { status: 400 });
   }

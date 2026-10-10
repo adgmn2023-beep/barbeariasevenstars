@@ -23,6 +23,7 @@ export const loginSchema = z.object({
 export const bookingSchema = z.object({
   service_id: z.uuid("Serviço inválido."),
   start_at: z.iso.datetime({ offset: true, error: "Horário inválido." }),
+  barber_id: z.uuid("Barbeiro inválido.").nullable().optional(),
 });
 export const statusSchema = z
   .object({

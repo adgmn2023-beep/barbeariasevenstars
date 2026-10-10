@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { availableSlots, canTransition, localDate } from "../src/lib/schedule";
+import {
+  availableSlots,
+  availableSlotsForAnyBarber,
+  canTransition,
+  localDate,
+} from "../src/lib/schedule";
 import type { Hours, Settings, Status } from "../src/lib/types";
 const now = new Date("2026-10-12T08:00:00-03:00");
 const hours: Hours = {
@@ -45,6 +50,21 @@ describe("Disponibilidade da agenda", () => {
     expect(result).not.toContain(new Date(at("16:00")).toISOString());
     expect(result).toContain(new Date(at("14:20")).toISOString());
     expect(result).toContain(new Date(at("16:20")).toISOString());
+  });
+  it("sem preferência só mostra horário se algum barbeiro couber o serviço inteiro", () => {
+    const result = availableSlotsForAnyBarber(
+      "2026-10-12",
+      80,
+      hours,
+      settings,
+      [
+        [{ start_at: at("09:00"), end_at: at("10:00") }],
+        [{ start_at: at("10:00"), end_at: at("11:00") }],
+      ],
+      now,
+    );
+    expect(result).not.toContain(new Date(at("09:00")).toISOString());
+    expect(result).toContain(new Date(at("11:00")).toISOString());
   });
   it("não oferece expediente fechado ou bloqueado por inteiro", () => {
     expect(slots(40, { ...hours, closed: true })).toEqual([]);

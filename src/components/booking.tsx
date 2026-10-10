@@ -8,16 +8,17 @@ import {
   Scissors,
   ShieldCheck,
   Star,
+  UserRound,
 } from "lucide-react";
 import { browserDb, configured } from "@/lib/supabase/client";
 import {
-  availableSlots,
+  availableSlotsForAnyBarber,
   dateLabel,
   localDate,
   money,
   timeLabel,
 } from "@/lib/schedule";
-import type { Service, Hours, Settings } from "@/lib/types";
+import type { Service, Hours, Settings, Busy } from "@/lib/types";
 import { readableError } from "@/lib/validation";
 const demoNames = [
   "Acabamento (Pé)",
@@ -32,6 +33,7 @@ const demoNames = [
 ];
 export function Booking() {
   const [services, setServices] = useState<Service[]>([]);
+  const [barbers, setBarbers] = useState<{ id: string; display_name: string }[]>([]);
   const [hours, setHours] = useState<Hours[]>([]);
   const [settings, setSettings] = useState<Settings>({
     id: 1,
@@ -40,6 +42,8 @@ export function Booking() {
     booking_window: 30,
   });
   const [service, setService] = useState<Service | null>(null);
+  const [selectedBarberId, setSelectedBarberId] = useState<string | null>(null);
+  const [assignedBarberName, setAssignedBarberName] = useState("");
   const [date, setDate] = useState(localDate());
   const [start, setStart] = useState("");
   const [step, setStep] = useState(1);
@@ -66,14 +70,17 @@ export function Booking() {
           return;
         }
         const db = browserDb();
-        const [s, h, c] = await Promise.all([
+        const [s, h, c, b] = await Promise.all([
           db.from("services").select("*").eq("active", true).order("name"),
           db.from("business_hours").select("*"),
           db.from("settings").select("*").eq("id", 1).single(),
+          db.rpc("list_active_barbers"),
         ]);
-        if (s.error || h.error || c.error) throw s.error ?? h.error ?? c.error;
+        if (s.error || h.error || c.error || b.error)
+          throw s.error ?? h.error ?? c.error ?? b.error;
         if (!active) return;
         setServices(s.data ?? []);
+        setBarbers(b.data ?? []);
         setHours(h.data ?? []);
         setSettings(c.data);
         const saved = sessionStorage.getItem("seven-booking");
@@ -89,7 +96,19 @@ export function Booking() {
               setService(found);
               setStart(v.start_at);
               setDate(localDate(new Date(v.start_at)));
-              setStep(3);
+              setSelectedBarberId(
+                typeof v.barber_id === "string" &&
+                  b.data?.some(
+                    (barber: { id: string; display_name: string }) =>
+                      barber.id === v.barber_id,
+                  )
+                  ? v.barber_id
+                  : null,
+              );
+              setAssignedBarberName(
+                typeof v.barber_name === "string" ? v.barber_name : "",
+              );
+              setStep(4);
             }
           } catch {
             sessionStorage.removeItem("seven-booking");
@@ -111,20 +130,29 @@ export function Booking() {
     const requestId = ++availabilityRequest.current.id;
     setSlotLoading(true);
     try {
-      const { data, error } = await browserDb().rpc("get_busy_ranges", {
-        p_date: date,
-      });
-      if (error) throw error;
+      const providers = selectedBarberId
+        ? barbers.filter((barber) => barber.id === selectedBarberId)
+        : barbers;
+      const busyByBarber = await Promise.all(
+        providers.map(async (barber) => {
+          const { data, error } = await browserDb().rpc("get_busy_ranges", {
+            p_date: date,
+            p_barber_id: barber.id,
+          });
+          if (error) throw error;
+          return (data ?? []) as Busy[];
+        }),
+      );
       if (requestId !== availabilityRequest.current.id) return;
       setSlots(
-        availableSlots(
+        availableSlotsForAnyBarber(
           date,
           service.duration_minutes,
           hours.find(
             (h) => h.weekday === new Date(`${date}T12:00:00-03:00`).getUTCDay(),
           ),
           settings,
-          data ?? [],
+          busyByBarber,
         ),
       );
     } catch (e) {
@@ -134,9 +162,9 @@ export function Booking() {
     } finally {
       if (requestId === availabilityRequest.current.id) setSlotLoading(false);
     }
-  }, [date, service, hours, settings]);
+  }, [date, service, hours, settings, barbers, selectedBarberId]);
   useEffect(() => {
-    if (step !== 2) return;
+    if (step !== 3) return;
     const tracker = availabilityRequest.current;
     void refresh();
     const interval = setInterval(() => void refresh(), 30000);
@@ -153,7 +181,11 @@ export function Booking() {
       const db = browserDb();
       sessionStorage.setItem(
         "seven-booking",
-        JSON.stringify({ service_id: service.id, start_at: start }),
+        JSON.stringify({
+          service_id: service.id,
+          start_at: start,
+          barber_id: selectedBarberId,
+        }),
       );
       const {
         data: { user },
@@ -174,12 +206,17 @@ export function Booking() {
       const response = await fetch("/api/agendamentos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ service_id: service.id, start_at: start }),
+        body: JSON.stringify({
+          service_id: service.id,
+          start_at: start,
+          barber_id: selectedBarberId,
+        }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
       sessionStorage.removeItem("seven-booking");
-      setStep(4);
+      setAssignedBarberName(result.barber_name ?? "");
+      setStep(5);
     } catch (e) {
       setError(readableError(e));
     } finally {
@@ -188,6 +225,18 @@ export function Booking() {
   }
   const max = new Date(`${localDate()}T12:00:00-03:00`);
   max.setUTCDate(max.getUTCDate() + settings.booking_window);
+  const selectedBarber = barbers.find(
+    (barber) => barber.id === selectedBarberId,
+  );
+  const barberLabel =
+    assignedBarberName ||
+    selectedBarber?.display_name ||
+    (barbers.length > 1 ? "Sem preferência" : "A definir");
+  const visibleStep = barbers.length > 1 ? step : step === 1 ? 1 : step - 1;
+  const stepLabels =
+    barbers.length > 1
+      ? ["Serviço", "Barbeiro", "Data e horário", "Confirmação"]
+      : ["Serviço", "Data e horário", "Confirmação"];
   return (
     <>
       <section className="booking-intro">
@@ -216,10 +265,10 @@ export function Booking() {
       <div className="booking-layout">
         <section>
           <ol className="steps" aria-label="Etapas do agendamento">
-            {["Serviço", "Data e horário", "Confirmação"].map((s, i) => (
-              <li key={s} className={step >= i + 1 ? "active" : ""}>
-                <span>{step > i + 1 ? <Check size={15} /> : i + 1}</span>
-                {s}
+            {stepLabels.map((label, i) => (
+              <li key={label} className={visibleStep >= i + 1 ? "active" : ""}>
+                <span>{visibleStep > i + 1 ? <Check size={15} /> : i + 1}</span>
+                {label}
               </li>
             ))}
           </ol>
@@ -243,7 +292,7 @@ export function Booking() {
                     Escolha o serviço que combina com você.
                   </p>
                 </div>
-                <span className="badge">01 / 03</span>
+                <span className="badge">01 / {stepLabels.length.toString().padStart(2, "0")}</span>
               </div>
               {loading ? (
                 <div
@@ -268,6 +317,8 @@ export function Booking() {
                       onClick={() => {
                         setService(s);
                         setStart("");
+                        setSelectedBarberId(null);
+                        setAssignedBarberName("");
                       }}
                       aria-pressed={service?.id === s.id}
                     >
@@ -300,23 +351,72 @@ export function Booking() {
                 </p>
                 <button
                   className="button"
-                  disabled={!service || !configured()}
+                  disabled={!service || !configured() || !barbers.length}
                   onClick={() => {
                     setError("");
-                    setStep(2);
+                    setStart("");
+                    if (barbers.length > 1) setStep(2);
+                    else {
+                      setSelectedBarberId(barbers[0]?.id ?? null);
+                      setStep(3);
+                    }
                   }}
                 >
-                  Escolher horário <ArrowRight size={17} />
+                  Continuar <ArrowRight size={17} />
                 </button>
               </div>
             </>
           )}
           {step === 2 && (
             <>
+              <h2>Escolha o barbeiro</h2>
+              <p className="muted">
+                Selecione quem vai atender você ou deixe a equipe escolher.
+              </p>
+              <div className="service-grid barber-grid">
+                {barbers.map((barber) => (
+                  <button
+                    className={`service-card ${selectedBarberId === barber.id ? "selected" : ""}`}
+                    key={barber.id}
+                    onClick={() => {
+                      setSelectedBarberId(barber.id);
+                      setStart("");
+                    }}
+                    aria-pressed={selectedBarberId === barber.id}
+                  >
+                    <span className="service-icon"><UserRound size={21} /></span>
+                    <h3>{barber.display_name}</h3>
+                    <span className="muted">Escolher este barbeiro</span>
+                  </button>
+                ))}
+                <button
+                  className={`service-card ${selectedBarberId === null ? "selected" : ""}`}
+                  onClick={() => {
+                    setSelectedBarberId(null);
+                    setStart("");
+                  }}
+                  aria-pressed={selectedBarberId === null}
+                >
+                  <span className="service-icon"><UserRound size={21} /></span>
+                  <h3>Sem preferência</h3>
+                  <span className="muted">A equipe encontra o melhor horário.</span>
+                </button>
+              </div>
+              <div className="booking-actions">
+                <button className="quiet row" onClick={() => setStep(1)}>
+                  <ArrowLeft size={16} /> Voltar
+                </button>
+                <button className="button" disabled={selectedBarberId === null && !barbers.length} onClick={() => setStep(3)}>
+                  Escolher horário <ArrowRight size={17} />
+                </button>
+              </div>
+            </>
+          )}
+          {step === 3 && (
+            <>
               <h2>Reserve seu momento</h2>
               <p className="muted">
-                Horários no fuso de Brasília. O serviço ocupa{" "}
-                {service?.duration_minutes} minutos.
+                {barberLabel} · horários no fuso de Brasília. O serviço ocupa {service?.duration_minutes} minutos.
               </p>
               <label className="date-picker">
                 Escolha o dia
@@ -381,20 +481,20 @@ export function Booking() {
                 </div>
               )}
               <div className="booking-actions">
-                <button className="quiet row" onClick={() => setStep(1)}>
+                <button className="quiet row" onClick={() => setStep(barbers.length > 1 ? 2 : 1)}>
                   <ArrowLeft size={16} /> Voltar
                 </button>
                 <button
                   className="button"
                   disabled={!start || !slots.includes(start) || slotLoading}
-                  onClick={() => setStep(3)}
+                  onClick={() => setStep(4)}
                 >
                   Revisar reserva <ArrowRight size={17} />
                 </button>
               </div>
             </>
           )}
-          {step === 3 && (
+          {step === 4 && (
             <>
               <h2>Tudo certo para o seu próximo corte?</h2>
               <p className="muted">
@@ -411,13 +511,14 @@ export function Booking() {
                 <p className="muted">
                   Duração de {service?.duration_minutes} minutos
                 </p>
+                <p>Barbeiro: {barberLabel}</p>
                 <strong>{money(service?.price ?? 0)}</strong>
                 <p className="muted">
                   O agendamento fica pendente até a confirmação da barbearia.
                 </p>
               </div>
               <div className="booking-actions">
-                <button className="quiet row" onClick={() => setStep(2)}>
+                <button className="quiet row" onClick={() => setStep(3)}>
                   <ArrowLeft size={16} /> Alterar horário
                 </button>
                 <button disabled={busy} className="button" onClick={confirm}>
@@ -427,10 +528,11 @@ export function Booking() {
               </div>
             </>
           )}
-          {step === 4 && (
+          {step === 5 && (
             <div className="card confirmation">
               <Check size={42} color="#22c55e" />
               <h2>Seu horário foi reservado!</h2>
+              <p>Barbeiro: {assignedBarberName || barberLabel}</p>
               <p>
                 A barbearia recebeu o pedido. Acompanhe a confirmação em seus
                 agendamentos.
@@ -456,6 +558,10 @@ export function Booking() {
             <div className="summary-line">
               <span>Serviço</span>
               <strong>{service ? money(service.price) : "—"}</strong>
+            </div>
+            <div className="summary-line">
+              <span>Barbeiro</span>
+              <strong>{barberLabel}</strong>
             </div>
             <div className="summary-line">
               <span>Data e horário</span>

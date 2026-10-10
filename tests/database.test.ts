@@ -117,6 +117,10 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
       "select is_nullable from information_schema.columns where table_schema='public' and table_name='appointments' and column_name='barber_id'",
     );
     expect(nullability.rows[0].is_nullable).toBe("NO");
+    const snapshotColumn = await db.query<{ is_nullable: string }>(
+      "select is_nullable from information_schema.columns where table_schema='public' and table_name='appointments' and column_name='barber_name'",
+    );
+    expect(snapshotColumn.rows[0].is_nullable).toBe("YES");
     const result = await db.query<{ role: string }>(
       "select role from profiles where id=$1",
       [ids.alice],
@@ -216,6 +220,14 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     expect(first.rows[0].id).toBeTruthy();
     expect(second.rows[0].id).toBeTruthy();
     await asOwner();
+    const snapshot = await db.query<{ barber_id: string; barber_name: string }>(
+      "select barber_id,barber_name from appointments where id=$1",
+      [first.rows[0].id],
+    );
+    expect(snapshot.rows[0]).toEqual({
+      barber_id: ids.barberA,
+      barber_name: "Barbeiro A",
+    });
     expect(
       (
         await db.query<{ count: number }>(
@@ -507,7 +519,9 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
 
 describe("Migração multi-barbeiro sobre banco legado", () => {
   it("promove admin existente a master e não quebra reservas sem barbeiro ativo", async () => {
-    const legacyMigrations = migrations.filter((name) => !name.includes("004_"));
+    const legacyMigrations = migrations.filter(
+      (name) => !name.includes("004_") && !name.includes("005_"),
+    );
     const legacy = await createDatabase(legacyMigrations);
     try {
       const legacyUser = "66666666-6666-4666-8666-666666666666";
@@ -529,9 +543,12 @@ describe("Migração multi-barbeiro sobre banco legado", () => {
          values($1,'Legado',30,40,now()+interval '3 days',now()+interval '3 days 40 minutes',(now()+interval '3 days')::date)`,
         [legacyUser],
       );
-      const newMigration = migrations.find((name) => name.includes("004_"));
-      expect(newMigration).toBeTruthy();
-      await legacy.exec(readFileSync(`supabase/migrations/${newMigration}`, "utf8"));
+      const rolesMigration = migrations.find((name) => name.includes("004_"));
+      const teamMigration = migrations.find((name) => name.includes("005_"));
+      expect(rolesMigration).toBeTruthy();
+      expect(teamMigration).toBeTruthy();
+      await legacy.exec(readFileSync(`supabase/migrations/${rolesMigration}`, "utf8"));
+      await legacy.exec(readFileSync(`supabase/migrations/${teamMigration}`, "utf8"));
       const role = await legacy.query<{ role: string }>(
         "select role from profiles where id=$1",
         [legacyUser],
@@ -554,10 +571,11 @@ describe("Migração multi-barbeiro sobre banco legado", () => {
         "insert into barbers(profile_id,display_name) values($1,'Barbeiro Inicial')",
         [legacyBarber],
       );
-      const linked = await legacy.query<{ barber_id: string }>(
-        "select barber_id from appointments",
+      const linked = await legacy.query<{ barber_id: string; barber_name: string }>(
+        "select barber_id,barber_name from appointments",
       );
       expect(linked.rows[0].barber_id).toBeTruthy();
+      expect(linked.rows[0].barber_name).toBe("Barbeiro Inicial");
     } finally {
       await legacy.close();
     }
