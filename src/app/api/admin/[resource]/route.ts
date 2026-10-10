@@ -1,7 +1,77 @@
-import {NextResponse} from 'next/server';
-import {z} from 'zod';
-import {requireAdmin} from '@/lib/admin';
-import {blockSchema,hoursSchema,serviceSchema,settingsSchema} from '@/lib/admin-validation';
-import {readableError} from '@/lib/validation';
-export async function POST(request:Request,{params}:{params:Promise<{resource:string}>}){try{const {db}=await requireAdmin();const {resource}=await params;const body=await request.json();let error;if(resource==='services'){const values=serviceSchema.parse(body);const result=body.id?await db.from('services').update(values).eq('id',z.uuid().parse(body.id)):await db.from('services').insert(values);error=result.error;}else if(resource==='blocked_slots'){const result=await db.from('blocked_slots').insert(blockSchema.parse(body));error=result.error;}else if(resource==='business_hours'){const values=hoursSchema.parse(body);const result=await db.from('business_hours').update(values).eq('weekday',values.weekday);error=result.error;}else if(resource==='settings'){const result=await db.from('settings').update(settingsSchema.parse(body)).eq('id',1);error=result.error;}else return NextResponse.json({error:'Recurso não encontrado.'},{status:404});if(error)throw error;return NextResponse.json({ok:true});}catch(e){return NextResponse.json({error:readableError(e)},{status:400});}}
-export async function DELETE(request:Request,{params}:{params:Promise<{resource:string}>}){try{const {db}=await requireAdmin();const {resource}=await params;if(!['services','blocked_slots'].includes(resource))return NextResponse.json({error:'Operação não permitida.'},{status:400});const {id}=z.object({id:z.uuid()}).parse(await request.json());const {error}=await db.from(resource).delete().eq('id',id);if(error)throw error;return NextResponse.json({ok:true});}catch(e){return NextResponse.json({error:readableError(e)},{status:400});}}
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { requireAdmin } from "@/lib/admin";
+import {
+  blockSchema,
+  hoursSchema,
+  serviceSchema,
+  settingsSchema,
+} from "@/lib/admin-validation";
+import { readableError } from "@/lib/validation";
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ resource: string }> },
+) {
+  try {
+    const { db } = await requireAdmin();
+    const { resource } = await params;
+    const body = await request.json();
+    let error;
+    if (resource === "services") {
+      const values = serviceSchema.parse(body);
+      const result = body.id
+        ? await db
+            .from("services")
+            .update(values)
+            .eq("id", z.uuid().parse(body.id))
+        : await db.from("services").insert(values);
+      error = result.error;
+    } else if (resource === "blocked_slots") {
+      const result = await db
+        .from("blocked_slots")
+        .insert(blockSchema.parse(body));
+      error = result.error;
+    } else if (resource === "business_hours") {
+      const values = hoursSchema.parse(body);
+      const result = await db
+        .from("business_hours")
+        .update(values)
+        .eq("weekday", values.weekday);
+      error = result.error;
+    } else if (resource === "settings") {
+      const result = await db
+        .from("settings")
+        .update(settingsSchema.parse(body))
+        .eq("id", 1);
+      error = result.error;
+    } else
+      return NextResponse.json(
+        { error: "Recurso não encontrado." },
+        { status: 404 },
+      );
+    if (error) throw error;
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json({ error: readableError(e) }, { status: 400 });
+  }
+}
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ resource: string }> },
+) {
+  try {
+    const { db } = await requireAdmin();
+    const { resource } = await params;
+    if (!["services", "blocked_slots"].includes(resource))
+      return NextResponse.json(
+        { error: "Operação não permitida." },
+        { status: 400 },
+      );
+    const { id } = z.object({ id: z.uuid() }).parse(await request.json());
+    const { error } = await db.from(resource).delete().eq("id", id);
+    if (error) throw error;
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json({ error: readableError(e) }, { status: 400 });
+  }
+}

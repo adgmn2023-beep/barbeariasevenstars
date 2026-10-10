@@ -1,2 +1,4 @@
-import {Catalog} from '@/components/admin/catalog';
-export default function Page(){return <Catalog/>}
+import { Catalog } from "@/components/admin/catalog";
+export default function Page() {
+  return <Catalog />;
+}

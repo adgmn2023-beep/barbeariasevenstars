@@ -1,6 +1,53 @@
-import {z} from 'zod';
-export const serviceSchema=z.object({name:z.string().trim().min(2,'Informe o nome do serviço.').max(120),price:z.coerce.number().min(0,'O preço não pode ser negativo.').max(99999999),duration_minutes:z.coerce.number().int().min(5).max(600),active:z.boolean()});
-export const blockSchema=z.object({start_at:z.iso.datetime({offset:true}),end_at:z.iso.datetime({offset:true}),reason:z.string().trim().max(500).nullable().optional()}).refine(v=>new Date(v.end_at)>new Date(v.start_at),{message:'O fim deve ser posterior ao início.'});
-const time=z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/,'Informe um horário válido.').refine(v=>Number(v.slice(0,2))<24&&Number(v.slice(3,5))<60,'Horário inválido.');
-export const hoursSchema=z.object({weekday:z.number().int().min(0).max(6),closed:z.boolean(),opens:time,closes:time,lunch_start:time.nullable(),lunch_end:time.nullable()}).refine(v=>v.opens<v.closes,{message:'O encerramento deve ser após a abertura.'}).refine(v=>(!v.lunch_start&&!v.lunch_end)||!!v.lunch_start&&!!v.lunch_end&&v.lunch_start<v.lunch_end&&v.lunch_start>=v.opens&&v.lunch_end<=v.closes,{message:'O almoço deve estar dentro do expediente.'});
-export const settingsSchema=z.object({slot_step:z.coerce.number().int().min(5).max(120),min_notice:z.coerce.number().int().min(0).max(10080),booking_window:z.coerce.number().int().min(1).max(365)});
+import { z } from "zod";
+export const serviceSchema = z.object({
+  name: z.string().trim().min(2, "Informe o nome do serviço.").max(120),
+  price: z.coerce
+    .number()
+    .min(0, "O preço não pode ser negativo.")
+    .max(99999999),
+  duration_minutes: z.coerce.number().int().min(5).max(600),
+  active: z.boolean(),
+});
+export const blockSchema = z
+  .object({
+    start_at: z.iso.datetime({ offset: true }),
+    end_at: z.iso.datetime({ offset: true }),
+    reason: z.string().trim().max(500).nullable().optional(),
+  })
+  .refine((v) => new Date(v.end_at) > new Date(v.start_at), {
+    message: "O fim deve ser posterior ao início.",
+  });
+const time = z
+  .string()
+  .regex(/^\d{2}:\d{2}(:\d{2})?$/, "Informe um horário válido.")
+  .refine(
+    (v) => Number(v.slice(0, 2)) < 24 && Number(v.slice(3, 5)) < 60,
+    "Horário inválido.",
+  );
+export const hoursSchema = z
+  .object({
+    weekday: z.number().int().min(0).max(6),
+    closed: z.boolean(),
+    opens: time,
+    closes: time,
+    lunch_start: time.nullable(),
+    lunch_end: time.nullable(),
+  })
+  .refine((v) => v.opens < v.closes, {
+    message: "O encerramento deve ser após a abertura.",
+  })
+  .refine(
+    (v) =>
+      (!v.lunch_start && !v.lunch_end) ||
+      (!!v.lunch_start &&
+        !!v.lunch_end &&
+        v.lunch_start < v.lunch_end &&
+        v.lunch_start >= v.opens &&
+        v.lunch_end <= v.closes),
+    { message: "O almoço deve estar dentro do expediente." },
+  );
+export const settingsSchema = z.object({
+  slot_step: z.coerce.number().int().min(5).max(120),
+  min_notice: z.coerce.number().int().min(0).max(10080),
+  booking_window: z.coerce.number().int().min(1).max(365),
+});
