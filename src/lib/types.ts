@@ -14,7 +14,7 @@ export type Profile = {
   email: string;
   data_nascimento: string | null;
   privacy_accepted_at: string | null;
-  role: "admin" | "client";
+  role: "client" | "barber" | "admin" | "master";
 };
 export type Appointment = {
   id: string;

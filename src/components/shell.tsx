@@ -29,7 +29,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           .select("role")
           .eq("id", user.id)
           .single();
-        setAdmin(data?.role === "admin");
+        setAdmin(["barber", "admin", "master"].includes(data?.role ?? ""));
       } else setAdmin(false);
     };
     void load();

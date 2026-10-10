@@ -11,7 +11,7 @@ export async function requireAdmin() {
     .select("role")
     .eq("id", user.id)
     .single();
-  if (error || data?.role !== "admin")
+  if (error || !["admin", "master"].includes(data?.role ?? ""))
     throw new Error("Acesso restrito ao administrador.");
   return { db, user };
 }

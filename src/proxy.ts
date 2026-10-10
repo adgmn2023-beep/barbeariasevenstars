@@ -55,7 +55,8 @@ export async function proxy(request: NextRequest) {
       .select("role")
       .eq("id", user.id)
       .single();
-    if (data?.role !== "admin") target = "/";
+    if (!data || !["barber", "admin", "master"].includes(data.role))
+      target = "/";
   }
   if (target) {
     const redirect = NextResponse.redirect(new URL(target, request.url));

@@ -22,7 +22,8 @@ export default async function Layout({
     .select("role")
     .eq("id", user.id)
     .single();
-  if (data?.role !== "admin") redirect("/");
+  if (!data || !["barber", "admin", "master"].includes(data.role))
+    redirect("/");
   return (
     <>
       <p className="eyebrow">GESTÃO SEVEN STARS</p>
