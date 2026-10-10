@@ -124,6 +124,27 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     expect(result.rows[0].role).toBe("client");
   });
 
+  it("migration 005 adiciona flag de senha e mantém audit_log exclusivo do servidor", async () => {
+    const profile = await db.query<{ must_change_password: boolean }>(
+      "select must_change_password from profiles where id=$1",
+      [ids.alice],
+    );
+    expect(profile.rows[0].must_change_password).toBe(false);
+    await asUser(ids.alice);
+    await expect(
+      db.exec(`update profiles set must_change_password=true where id='${ids.alice}'`),
+    ).rejects.toThrow(/permission denied/);
+    await expect(db.query("select * from audit_log")).rejects.toThrow(
+      /permission denied/,
+    );
+    await db.exec("reset role;set role service_role;");
+    await db.query(
+      "insert into audit_log(actor_profile_id,action,target_profile_id) values($1,'test_action',$2)",
+      [ids.master, ids.alice],
+    );
+    expect((await db.query("select * from audit_log")).rows).toHaveLength(1);
+  });
+
   it("cliente lê somente o próprio perfil e não altera o próprio papel", async () => {
     await asUser(ids.alice);
     expect((await db.query("select * from profiles")).rows).toHaveLength(1);
@@ -418,7 +439,7 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     await asOwner();
     await expect(
       db.exec("update appointments set status='cancelado'"),
-    ).rejects.toThrow(/check constraint/);
+    ).rejects.toThrow(/motivo do cancelamento/);
     await db.exec(
       "update appointments set status='cancelado',cancel_reason='Solicitação do cliente'",
     );
@@ -430,6 +451,26 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     expect(snapshot.rows[0].duration_minutes).toBe(40);
     await asUser(ids.alice);
     expect((await book("09:00", ids.barberB)).rows[0].id).toBeTruthy();
+  });
+
+  it("permite cancelar agendamento confirmado somente com motivo", async () => {
+    await asUser(ids.alice);
+    await book("09:00", ids.barberA);
+    await asOwner();
+    await db.exec("update appointments set status='confirmado'");
+    await expect(
+      db.exec("update appointments set status='cancelado',cancel_reason=''") ,
+    ).rejects.toThrow(/motivo do cancelamento/);
+    await db.exec(
+      "update appointments set status='cancelado',cancel_reason='Indisponibilidade do barbeiro'",
+    );
+    const canceled = await db.query<{ status: string; cancel_reason: string }>(
+      "select status,cancel_reason from appointments",
+    );
+    expect(canceled.rows[0]).toEqual({
+      status: "cancelado",
+      cancel_reason: "Indisponibilidade do barbeiro",
+    });
   });
 
   it("impede transições inválidas de status e preserva exclusão de conta", async () => {

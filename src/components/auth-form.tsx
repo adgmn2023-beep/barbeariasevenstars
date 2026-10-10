@@ -93,6 +93,12 @@ export function AuthForm({
             .select("*")
             .eq("id", data.user.id)
             .single();
+          if (p?.must_change_password) {
+            location.assign(
+              `/trocar-senha?required=1&next=${encodeURIComponent(next)}`,
+            );
+            return;
+          }
           location.assign(
             !p?.telefone || !p?.data_nascimento || !p?.privacy_accepted_at
               ? `/completar-cadastro?next=${encodeURIComponent(next)}`

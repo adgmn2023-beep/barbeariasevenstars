@@ -19,6 +19,7 @@ export async function proxy(request: NextRequest) {
     "/perfil",
     "/meus-agendamentos",
     "/completar-cadastro",
+    "/trocar-senha",
   ].some((p) => request.nextUrl.pathname.startsWith(p));
   if (
     !process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -47,15 +48,32 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await db.auth.getUser();
   let target: string | undefined;
+  let role: string | undefined;
   if (protectedPage && !user)
     target = `/login?next=${encodeURIComponent(request.nextUrl.pathname)}`;
-  if (user && request.nextUrl.pathname.startsWith("/painelinterno")) {
+  if (user) {
     const { data } = await db
       .from("profiles")
-      .select("role")
+      .select("role,must_change_password")
       .eq("id", user.id)
       .single();
-    if (!data || !["barber", "admin", "master"].includes(data.role))
+    role = data?.role;
+    const path = request.nextUrl.pathname;
+    const passwordFlow =
+      path === "/trocar-senha" || path === "/api/conta/trocar-senha";
+    if (data?.must_change_password && !passwordFlow)
+      target = `/trocar-senha?required=1&next=${encodeURIComponent(path + request.nextUrl.search)}`;
+    if (path.startsWith("/painelinterno") && data?.role === "barber") {
+      const { data: barber } = await db
+        .from("barbers")
+        .select("active")
+        .eq("profile_id", user.id)
+        .maybeSingle();
+      if (!barber?.active) target = "/";
+    }
+  }
+  if (user && request.nextUrl.pathname.startsWith("/painelinterno")) {
+    if (!role || !["barber", "admin", "master"].includes(role))
       target = "/";
   }
   if (target) {

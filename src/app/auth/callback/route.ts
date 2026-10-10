@@ -17,6 +17,13 @@ export async function GET(request: Request) {
         .eq("id", user!.id)
         .single();
       const next = safeNext(url.searchParams.get("next"));
+      if (p?.must_change_password)
+        return NextResponse.redirect(
+          new URL(
+            `/trocar-senha?required=1&next=${encodeURIComponent(next)}`,
+            url.origin,
+          ),
+        );
       return NextResponse.redirect(
         new URL(
           !p?.telefone || !p?.data_nascimento || !p?.privacy_accepted_at
