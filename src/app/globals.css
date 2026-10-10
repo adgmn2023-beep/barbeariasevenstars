@@ -17,6 +17,7 @@ h3,
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 48px;
   border-radius: 8px;
   padding: 10px 14px;
   font-size: 12px;
@@ -414,17 +415,65 @@ textarea:focus-visible {
 .admin-tabs {
   display: flex;
   overflow: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
   gap: 8px;
   margin: 20px 0 30px;
   border-bottom: 1px solid #3a322e;
   padding-bottom: 15px;
 }
 .admin-tabs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
   white-space: nowrap;
   padding: 10px 16px;
   background: #2a2421;
   border-radius: 8px;
   font-size: 13px;
+}
+.admin-install {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  margin: 18px 0;
+  padding: 20px;
+}
+.admin-install h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.ios-install-guide {
+  flex-basis: 100%;
+}
+.ios-install-guide p {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+.ios-install-guide ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ios-install-guide li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+}
+.add-home-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  font-size: 18px;
+  line-height: 1;
 }
 .pending {
   border-color: #b67f25;
@@ -514,6 +563,21 @@ th {
   }
 }
 @media (max-width: 700px) {
+  .admin-install {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 20px;
+  }
+  .admin-install .button {
+    width: 100%;
+  }
+  .admin-tabs {
+    margin: 14px 0 22px;
+    scroll-snap-type: x proximity;
+  }
+  .admin-tabs a {
+    scroll-snap-align: start;
+  }
   .booking-intro {
     margin-bottom: 30px;
   }
@@ -579,6 +643,19 @@ th {
   }
   .stat strong {
     font-size: 25px;
+  }
+}
+@media (max-width: 900px) and (orientation: landscape) {
+  .admin-install {
+    padding: 16px 20px;
+  }
+  .admin-tabs {
+    margin-top: 12px;
+    margin-bottom: 20px;
+  }
+  .sound-prompt {
+    padding: 16px;
+    gap: 12px;
   }
 }
 @theme {

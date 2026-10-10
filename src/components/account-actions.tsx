@@ -26,7 +26,18 @@ export function AccountActions() {
         throw new Error(
           "Este navegador não oferece notificações. No iPhone, instale o app na tela inicial e abra por ele.",
         );
-      const registration = await navigator.serviceWorker.register("/sw.js");
+      if (!active && !process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY)
+        throw new Error(
+          "As notificações ainda não foram configuradas pela barbearia.",
+        );
+      // Solicitar a permissão antes de aguardar rede preserva o gesto no Safari.
+      if (!active && (await Notification.requestPermission()) !== "granted")
+        throw new Error(
+          "Permita notificações nas configurações do navegador para continuar.",
+        );
+      const registration = await navigator.serviceWorker.register("/sw.js", {
+        scope: "/",
+      });
       await navigator.serviceWorker.ready;
       const existing = await registration.pushManager.getSubscription();
       if (existing) {

@@ -2,6 +2,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { serverDb } from "@/lib/supabase/server";
 import { AdminAlerts } from "@/components/admin/alerts";
+import { InstallPanel } from "@/components/admin/install-panel";
+export const metadata = {
+  title: "Seven Stars Admin",
+  manifest: "/painelinterno/manifest.webmanifest",
+};
 export default async function Layout({
   children,
 }: {
@@ -39,6 +44,7 @@ export default async function Layout({
           </Link>
         ))}
       </nav>
+      <InstallPanel />
       <AdminAlerts />
       {children}
     </>
