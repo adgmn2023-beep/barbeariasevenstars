@@ -45,7 +45,8 @@ returns table(id uuid,email text) language sql stable security definer set searc
 $$;
 -- O telefone de login não pode divergir da identidade técnica do Auth.
 create function public.guard_client_login_phone() returns trigger language plpgsql set search_path=public as $$ begin
- if old.email like '%@clientes.sevenstars.invalid'
+ if current_user in ('authenticated','anon')
+   and old.email like '%@clientes.sevenstars.invalid'
    and public.normalize_client_phone(new.telefone) is distinct from public.normalize_client_phone(old.telefone) then
    raise exception 'Para alterar o telefone de acesso, fale com a barbearia.';
  end if;
