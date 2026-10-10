@@ -26,8 +26,15 @@ export function AuthForm({
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [phone, setPhone] = useState("");
-  const [nextPath, setNextPath] = useState('/');
-  useEffect(()=>{const query=new URLSearchParams(location.search);setNextPath(safeNext(query.get('next')));if(query.get('erro')==='link')setError('Este link é inválido ou expirou. Solicite um novo e-mail e abra no mesmo navegador.');},[]);
+  const [nextPath, setNextPath] = useState("/");
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    setNextPath(safeNext(query.get("next")));
+    if (query.get("erro") === "link")
+      setError(
+        "Este link é inválido ou expirou. Solicite um novo e-mail e abra no mesmo navegador.",
+      );
+  }, []);
   const register = mode === "cadastro";
   const title = {
     login: "Bem-vindo de volta",
@@ -218,7 +225,9 @@ export function AuthForm({
         </>
       )}
       <div className="auth-links">
-        <Link href={`${register ? '/login' : '/cadastro'}?next=${encodeURIComponent(nextPath)}`}>
+        <Link
+          href={`${register ? "/login" : "/cadastro"}?next=${encodeURIComponent(nextPath)}`}
+        >
           {register ? "Já tenho uma conta" : "Criar uma conta"}
         </Link>
         <Link href="/esqueci-senha">Esqueci minha senha</Link>

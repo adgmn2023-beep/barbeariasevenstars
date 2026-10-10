@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -48,6 +48,7 @@ export function Booking() {
   const [slotLoading, setSlotLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const availabilityRequest = useRef({ id: 0 });
   useEffect(() => {
     let active = true;
     async function load() {
@@ -107,12 +108,14 @@ export function Booking() {
   }, []);
   const refresh = useCallback(async () => {
     if (!service || !configured()) return;
+    const requestId = ++availabilityRequest.current.id;
     setSlotLoading(true);
     try {
       const { data, error } = await browserDb().rpc("get_busy_ranges", {
         p_date: date,
       });
       if (error) throw error;
+      if (requestId !== availabilityRequest.current.id) return;
       setSlots(
         availableSlots(
           date,
@@ -125,17 +128,22 @@ export function Booking() {
         ),
       );
     } catch (e) {
+      if (requestId !== availabilityRequest.current.id) return;
       setError(readableError(e));
       setSlots([]);
     } finally {
-      setSlotLoading(false);
+      if (requestId === availabilityRequest.current.id) setSlotLoading(false);
     }
   }, [date, service, hours, settings]);
   useEffect(() => {
     if (step !== 2) return;
+    const tracker = availabilityRequest.current;
     void refresh();
     const interval = setInterval(() => void refresh(), 30000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      tracker.id++;
+    };
   }, [refresh, step]);
   async function confirm() {
     if (!service || !start) return;

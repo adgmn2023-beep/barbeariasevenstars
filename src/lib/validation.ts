@@ -6,9 +6,8 @@ export const profileSchema = z.object({
     .string()
     .transform((v) => v.replace(/\D/g, ""))
     .refine((v) => /^\d{10,11}$/.test(v), "Informe um telefone com DDD."),
-  data_nascimento: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Informe sua data de nascimento.")
+  data_nascimento: z.iso
+    .date("Informe sua data de nascimento válida.")
     .refine(
       (v) => v >= "1900-01-01" && new Date(v) <= new Date(),
       "Informe uma data de nascimento válida.",
@@ -53,9 +52,18 @@ export function readableError(error: unknown) {
   return "Não foi possível concluir. Verifique sua conexão e tente novamente.";
 }
 export function safeNext(value: string | null) {
-  if (!value?.startsWith('/') || value.includes('\\') || [...value].some(char=>char.charCodeAt(0)<=32)) return '/';
+  if (
+    !value?.startsWith("/") ||
+    value.includes("\\") ||
+    [...value].some((char) => char.charCodeAt(0) <= 32)
+  )
+    return "/";
   try {
-    const url = new URL(value, 'https://local.invalid');
-    return url.origin === 'https://local.invalid' ? url.pathname + url.search + url.hash : '/';
-  } catch { return '/'; }
+    const url = new URL(value, "https://local.invalid");
+    return url.origin === "https://local.invalid"
+      ? url.pathname + url.search + url.hash
+      : "/";
+  } catch {
+    return "/";
+  }
 }
