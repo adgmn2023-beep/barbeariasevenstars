@@ -1,17 +1,9 @@
 import { z } from "zod";
+import { phoneSchema } from "./phone-auth";
 z.config(z.locales.pt());
 export const profileSchema = z.object({
   nome: z.string().trim().min(2, "Informe seu nome completo.").max(120),
-  telefone: z
-    .string()
-    .transform((v) => v.replace(/\D/g, ""))
-    .refine((v) => /^\d{10,11}$/.test(v), "Informe um telefone com DDD."),
-  data_nascimento: z.iso
-    .date("Informe sua data de nascimento válida.")
-    .refine(
-      (v) => v >= "1900-01-01" && new Date(v) <= new Date(),
-      "Informe uma data de nascimento válida.",
-    ),
+  telefone: phoneSchema,
   privacy_accepted: z.literal(true, {
     error: "Aceite a política de privacidade.",
   }),
@@ -20,11 +12,29 @@ export const loginSchema = z.object({
   email: z.email("Informe um e-mail válido."),
   password: z.string().min(8, "A senha deve ter pelo menos 8 caracteres."),
 });
-export const bookingSchema = z.object({
-  service_id: z.uuid("Serviço inválido."),
-  start_at: z.iso.datetime({ offset: true, error: "Horário inválido." }),
-  barber_id: z.uuid("Barbeiro inválido.").nullable().optional(),
-});
+export const bookingSchema = z
+  .object({
+    service_id: z.uuid("Serviço inválido.").optional(),
+    service_ids: z
+      .array(z.uuid("Serviço inválido."))
+      .min(1, "Escolha pelo menos um serviço.")
+      .max(20, "Escolha no máximo 20 serviços.")
+      .refine(
+        (ids) => new Set(ids).size === ids.length,
+        "Selecione serviços diferentes.",
+      )
+      .optional(),
+    start_at: z.iso.datetime({ offset: true, error: "Horário inválido." }),
+    barber_id: z.uuid("Barbeiro inválido.").nullable().optional(),
+  })
+  .refine(
+    (value) => !!value.service_ids?.length || !!value.service_id,
+    "Escolha pelo menos um serviço.",
+  )
+  .transform(({ service_id, service_ids, ...rest }) => ({
+    ...rest,
+    service_ids: service_ids ?? [service_id!],
+  }));
 export const statusSchema = z
   .object({
     status: z.enum(["confirmado", "cancelado", "concluido", "faltou"]),

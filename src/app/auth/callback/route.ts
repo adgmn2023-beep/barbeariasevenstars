@@ -26,7 +26,7 @@ export async function GET(request: Request) {
         );
       return NextResponse.redirect(
         new URL(
-          !p?.telefone || !p?.data_nascimento || !p?.privacy_accepted_at
+          !p?.telefone || !p?.privacy_accepted_at
             ? `/completar-cadastro?next=${encodeURIComponent(next)}`
             : next,
           url.origin,

@@ -51,7 +51,6 @@ export function ProfileForm({ complete = false }: { complete?: boolean }) {
         .update({
           nome: p.nome,
           telefone: p.telefone,
-          data_nascimento: p.data_nascimento,
           privacy_accepted_at:
             profile?.privacy_accepted_at ?? new Date().toISOString(),
         })
@@ -84,29 +83,28 @@ export function ProfileForm({ complete = false }: { complete?: boolean }) {
             Nome completo
             <input name="nome" defaultValue={profile.nome} required />
           </label>
-          <label>
-            E-mail
-            <input value={profile.email} disabled />
-          </label>
+          {!profile.email.endsWith("@clientes.sevenstars.invalid") && (
+            <label>
+              E-mail
+              <input value={profile.email} disabled />
+            </label>
+          )}
           <label>
             Telefone com DDD
             <input
               name="telefone"
               type="tel"
               value={phone}
+              readOnly={profile.email.endsWith("@clientes.sevenstars.invalid")}
               onChange={(e) => setPhone(phoneMask(e.target.value))}
               required
             />
           </label>
-          <label>
-            Data de nascimento
-            <input
-              type="date"
-              name="data_nascimento"
-              defaultValue={profile.data_nascimento ?? ""}
-              required
-            />
-          </label>
+          {profile.email.endsWith("@clientes.sevenstars.invalid") && (
+            <small className="muted">
+              Para alterar o telefone de acesso, fale com a barbearia.
+            </small>
+          )}
           <label className="check">
             <input
               type="checkbox"

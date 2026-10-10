@@ -41,10 +41,7 @@ async function asOwner() {
   await db.exec("reset role;");
 }
 
-async function book(
-  time: string,
-  barberId: string | null = null,
-) {
+async function book(time: string, barberId: string | null = null) {
   return db.query<{ id: string }>(
     "select public.create_appointment($1::uuid,$2::timestamptz,$3::uuid) as id",
     [service, `${day}T${time}:00-03:00`, barberId],
@@ -81,9 +78,8 @@ beforeAll(async () => {
        ('${ids.barberA}','${ids.barberAProfile}','Barbeiro A'),
        ('${ids.barberB}','${ids.barberBProfile}','Barbeiro B');`,
   );
-  service = (
-    await db.query<{ id: string }>("select id from services limit 1")
-  ).rows[0].id;
+  service = (await db.query<{ id: string }>("select id from services limit 1"))
+    .rows[0].id;
   day = (
     await db.query<{ day: string }>(
       `select to_char((now() at time zone 'America/Sao_Paulo')::date + ((8-extract(dow from now() at time zone 'America/Sao_Paulo')::int)%7+1),'YYYY-MM-DD') as day`,
@@ -112,41 +108,105 @@ afterAll(async () => {
 });
 
 describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
-  it('soma snapshots e reserva toda a duração sem exigir nascimento',async()=>{
-    const extra=(await db.query<{id:string}>('select id from services where id<>$1 limit 1',[service])).rows[0].id;
-    await db.query('update services set price=25 where id=any($1::uuid[])',[[service,extra]]);
-    await db.query('update profiles set data_nascimento=null where id=$1',[ids.alice]);
+  it("soma snapshots e reserva toda a duração sem exigir nascimento", async () => {
+    const extra = (
+      await db.query<{ id: string }>(
+        "select id from services where id<>$1 limit 1",
+        [service],
+      )
+    ).rows[0].id;
+    await db.query("update services set price=25 where id=any($1::uuid[])", [
+      [service, extra],
+    ]);
+    await db.query("update profiles set data_nascimento=null where id=$1", [
+      ids.alice,
+    ]);
     await asUser(ids.alice);
-    await db.query('select create_appointment($1::uuid[],$2::timestamptz,$3::uuid)',[[service,extra],`${day}T09:00:00-03:00`,ids.barberA]);
-    const total=(await db.query<{price:string;duration_minutes:number;minutes:number}>('select price,duration_minutes,extract(epoch from end_at-start_at)/60 as minutes from appointments')).rows[0];
-    expect(Number(total.price)).toBe(50);expect(total.duration_minutes).toBe(80);expect(Number(total.minutes)).toBe(80);
-    expect((await db.query('select * from appointment_services')).rows).toHaveLength(2);
-    await asUser(ids.bob);expect((await db.query('select * from appointment_services')).rows).toHaveLength(0);
-    await expect(book('10:00',ids.barberA)).rejects.toThrow(/ocupado/);
-    await book('10:20',ids.barberA);
-    await asUser(ids.barberAProfile);expect((await db.query('select * from appointment_services')).rows).toHaveLength(3);
-    await asUser(ids.barberBProfile);expect((await db.query('select * from appointment_services')).rows).toHaveLength(0);
-    await asOwner();await db.exec('update services set price=0');
-  });
-  it('duração combinada respeita almoço e expediente e recusa serviços duplicados',async()=>{
-    const extra=(await db.query<{id:string}>('select id from services where id<>$1 limit 1',[service])).rows[0].id;
-    await db.exec("update business_hours set lunch_start='12:00',lunch_end='13:00'");
-    await asUser(ids.alice);
-    const reserve=(time:string,services=[service,extra])=>db.query('select create_appointment($1::uuid[],$2::timestamptz,$3::uuid)',[services,`${day}T${time}:00-03:00`,ids.barberA]);
-    await expect(reserve('11:00')).rejects.toThrow(/almoço/);
-    await expect(reserve('18:00')).rejects.toThrow(/expediente/);
-    await expect(reserve('09:00',[service,service])).rejects.toThrow(/diferentes/);
-    await asOwner();await db.exec('update business_hours set lunch_start=null,lunch_end=null');
-  });
-  it('rate limit é persistente e inacessível ao cliente; perfil só tem flag de senha',async()=>{
-    const bucket='a'.repeat(64);
+    await db.query(
+      "select create_appointment($1::uuid[],$2::timestamptz,$3::uuid)",
+      [[service, extra], `${day}T09:00:00-03:00`, ids.barberA],
+    );
+    const total = (
+      await db.query<{
+        price: string;
+        duration_minutes: number;
+        minutes: number;
+      }>(
+        "select price,duration_minutes,extract(epoch from end_at-start_at)/60 as minutes from appointments",
+      )
+    ).rows[0];
+    expect(Number(total.price)).toBe(50);
+    expect(total.duration_minutes).toBe(80);
+    expect(Number(total.minutes)).toBe(80);
+    expect(
+      (await db.query("select * from appointment_services")).rows,
+    ).toHaveLength(2);
+    await asUser(ids.bob);
+    expect(
+      (await db.query("select * from appointment_services")).rows,
+    ).toHaveLength(0);
+    await expect(book("10:00", ids.barberA)).rejects.toThrow(/ocupado/);
+    await book("10:20", ids.barberA);
+    await asUser(ids.barberAProfile);
+    expect(
+      (await db.query("select * from appointment_services")).rows,
+    ).toHaveLength(3);
+    await asUser(ids.barberBProfile);
+    expect(
+      (await db.query("select * from appointment_services")).rows,
+    ).toHaveLength(0);
     await asOwner();
-    for(const allowed of [true,true,false])expect((await db.query<{allowed:boolean}>('select consume_auth_rate_limit($1,2,900) as allowed',[bucket])).rows[0].allowed).toBe(allowed);
-    const columns=(await db.query<{column_name:string}>("select column_name from information_schema.columns where table_schema='public' and column_name ~ '(password|senha)'")).rows;
-    expect(columns).toEqual([{column_name:'must_change_password'}]);
+    await db.exec("update services set price=0");
+  });
+  it("duração combinada respeita almoço e expediente e recusa serviços duplicados", async () => {
+    const extra = (
+      await db.query<{ id: string }>(
+        "select id from services where id<>$1 limit 1",
+        [service],
+      )
+    ).rows[0].id;
+    await db.exec(
+      "update business_hours set lunch_start='12:00',lunch_end='13:00'",
+    );
     await asUser(ids.alice);
-    await expect(db.query('select consume_auth_rate_limit($1,2,900)',[bucket])).rejects.toThrow(/permission denied/);
-    await expect(db.query('select find_client_by_phone($1)',['11999999999'])).rejects.toThrow(/permission denied/);
+    const reserve = (time: string, services = [service, extra]) =>
+      db.query(
+        "select create_appointment($1::uuid[],$2::timestamptz,$3::uuid)",
+        [services, `${day}T${time}:00-03:00`, ids.barberA],
+      );
+    await expect(reserve("11:00")).rejects.toThrow(/almoço/);
+    await expect(reserve("18:00")).rejects.toThrow(/expediente/);
+    await expect(reserve("09:00", [service, service])).rejects.toThrow(
+      /diferentes/,
+    );
+    await asOwner();
+    await db.exec("update business_hours set lunch_start=null,lunch_end=null");
+  });
+  it("rate limit é persistente e inacessível ao cliente; perfil só tem flag de senha", async () => {
+    const bucket = "a".repeat(64);
+    await asOwner();
+    for (const allowed of [true, true, false])
+      expect(
+        (
+          await db.query<{ allowed: boolean }>(
+            "select consume_auth_rate_limit($1,2,900) as allowed",
+            [bucket],
+          )
+        ).rows[0].allowed,
+      ).toBe(allowed);
+    const columns = (
+      await db.query<{ column_name: string }>(
+        "select column_name from information_schema.columns where table_schema='public' and column_name ~ '(password|senha)'",
+      )
+    ).rows;
+    expect(columns).toEqual([{ column_name: "must_change_password" }]);
+    await asUser(ids.alice);
+    await expect(
+      db.query("select consume_auth_rate_limit($1,2,900)", [bucket]),
+    ).rejects.toThrow(/permission denied/);
+    await expect(
+      db.query("select find_client_by_phone($1)", ["11999999999"]),
+    ).rejects.toThrow(/permission denied/);
   });
   it("a migration do zero exige barber_id e o cadastro ignora role enviada", async () => {
     const nullability = await db.query<{ is_nullable: string }>(
@@ -172,7 +232,9 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     expect(profile.rows[0].must_change_password).toBe(false);
     await asUser(ids.alice);
     await expect(
-      db.exec(`update profiles set must_change_password=true where id='${ids.alice}'`),
+      db.exec(
+        `update profiles set must_change_password=true where id='${ids.alice}'`,
+      ),
     ).rejects.toThrow(/permission denied/);
     await expect(db.query("select * from audit_log")).rejects.toThrow(
       /permission denied/,
@@ -321,7 +383,9 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     await asUser(ids.carol);
     expect((await db.query("select * from appointments")).rows).toHaveLength(0);
     await asUser(ids.barberAProfile);
-    const visible = await db.query<{ id: string }>("select id from appointments");
+    const visible = await db.query<{ id: string }>(
+      "select id from appointments",
+    );
     expect(visible.rows).toEqual([{ id: own }]);
     expect((await db.query("select * from barbers")).rows).toHaveLength(0);
     const update = await db.query(
@@ -372,16 +436,22 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
   it("barbeiro não escreve serviços, não lê settings nem perfis alheios", async () => {
     await asUser(ids.barberAProfile);
     await expect(
-      db.exec("insert into services(name,price,duration_minutes) values('Negado',1,20)"),
+      db.exec(
+        "insert into services(name,price,duration_minutes) values('Negado',1,20)",
+      ),
     ).rejects.toThrow(/row-level security|permission denied/i);
     expect((await db.query("select * from settings")).rows).toHaveLength(0);
     expect((await db.query("select * from profiles")).rows).toHaveLength(1);
     const before = (
-      await db.query<{ opens: string }>("select opens from business_hours where weekday=1")
+      await db.query<{ opens: string }>(
+        "select opens from business_hours where weekday=1",
+      )
     ).rows[0].opens;
     await db.exec("update business_hours set opens='08:00' where weekday=1");
     const after = (
-      await db.query<{ opens: string }>("select opens from business_hours where weekday=1")
+      await db.query<{ opens: string }>(
+        "select opens from business_hours where weekday=1",
+      )
     ).rows[0].opens;
     expect(after).toBe(before);
   });
@@ -392,7 +462,9 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
       [ids.barberA, `${day}T09:00:00-03:00`, `${day}T10:00:00-03:00`],
     );
     await asUser(ids.barberBProfile);
-    expect((await db.query("select * from blocked_slots")).rows).toHaveLength(0);
+    expect((await db.query("select * from blocked_slots")).rows).toHaveLength(
+      0,
+    );
     await db.query(
       "insert into blocked_slots(barber_id,start_at,end_at) values($1,$2,$3)",
       [ids.barberB, `${day}T10:00:00-03:00`, `${day}T11:00:00-03:00`],
@@ -412,21 +484,24 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
       ).rows,
     ).toHaveLength(1);
     expect(
-      (
-        await db.query("select * from get_busy_ranges($1::date,null)", [day])
-      ).rows,
+      (await db.query("select * from get_busy_ranges($1::date,null)", [day]))
+        .rows,
     ).toHaveLength(0);
     await asUser(ids.alice);
     await book("09:00", ids.barberB);
     await asUser(ids.bob);
-    await expect(book("09:00", ids.barberA)).rejects.toThrow(/bloqueado|ocupado/);
-    await asOwner();
-    await db.query(
-      "insert into blocked_slots(start_at,end_at) values($1,$2)",
-      [`${day}T12:00:00-03:00`, `${day}T13:00:00-03:00`],
+    await expect(book("09:00", ids.barberA)).rejects.toThrow(
+      /bloqueado|ocupado/,
     );
+    await asOwner();
+    await db.query("insert into blocked_slots(start_at,end_at) values($1,$2)", [
+      `${day}T12:00:00-03:00`,
+      `${day}T13:00:00-03:00`,
+    ]);
     await asUser(ids.carol);
-    await expect(book("12:00", ids.barberB)).rejects.toThrow(/bloqueado|ocupado/);
+    await expect(book("12:00", ids.barberB)).rejects.toThrow(
+      /bloqueado|ocupado/,
+    );
   });
 
   it("disponibilidade sem barbeiro retorna somente interseções de todos", async () => {
@@ -462,8 +537,12 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
       "id",
     ]);
     expect(listed.rows).toHaveLength(2);
-    await expect(db.query("select * from barbers")).rejects.toThrow(/permission denied/);
-    expect((await db.query("select * from services where active")).rows.length).toBeGreaterThan(0);
+    await expect(db.query("select * from barbers")).rejects.toThrow(
+      /permission denied/,
+    );
+    expect(
+      (await db.query("select * from services where active")).rows.length,
+    ).toBeGreaterThan(0);
     expect((await db.query("select * from settings")).rows).toHaveLength(1);
     expect(
       (
@@ -486,7 +565,10 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     await expect(
       db.query("select deactivate_barber($1,null)", [ids.barberA]),
     ).rejects.toThrow(/Remaneje ou cancele/);
-    await db.query("select deactivate_barber($1,$2)", [ids.barberA, ids.barberB]);
+    await db.query("select deactivate_barber($1,$2)", [
+      ids.barberA,
+      ids.barberB,
+    ]);
     const appointment = await db.query<{ barber_id: string }>(
       "select barber_id from appointments",
     );
@@ -503,7 +585,9 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     await expect(book("10:01", ids.barberA)).rejects.toThrow(/grade/);
     await expect(book("18:40", ids.barberA)).rejects.toThrow(/expediente/);
     await asOwner();
-    await db.exec("update business_hours set lunch_start='14:00',lunch_end='15:00'");
+    await db.exec(
+      "update business_hours set lunch_start='14:00',lunch_end='15:00'",
+    );
     await asUser(ids.alice);
     await expect(book("13:40", ids.barberA)).rejects.toThrow(/almoço/);
   });
@@ -518,10 +602,15 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     await db.exec(
       "update appointments set status='cancelado',cancel_reason='Solicitação do cliente'",
     );
-    await db.exec("update services set price=123,duration_minutes=80 where id='" + service + "'");
-    const snapshot = await db.query<{ price: string; duration_minutes: number }>(
-      "select price,duration_minutes from appointments",
+    await db.exec(
+      "update services set price=123,duration_minutes=80 where id='" +
+        service +
+        "'",
     );
+    const snapshot = await db.query<{
+      price: string;
+      duration_minutes: number;
+    }>("select price,duration_minutes from appointments");
     expect(Number(snapshot.rows[0].price)).toBe(0);
     expect(snapshot.rows[0].duration_minutes).toBe(40);
     await asUser(ids.alice);
@@ -534,7 +623,7 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     await asOwner();
     await db.exec("update appointments set status='confirmado'");
     await expect(
-      db.exec("update appointments set status='cancelado',cancel_reason=''") ,
+      db.exec("update appointments set status='cancelado',cancel_reason=''"),
     ).rejects.toThrow(/motivo do cancelamento/);
     await db.exec(
       "update appointments set status='cancelado',cancel_reason='Indisponibilidade do barbeiro'",
@@ -553,11 +642,17 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     await book("09:00", ids.barberA);
     await asOwner();
     await expect(
-      db.exec("update appointments set status='concluido' where status='pendente'"),
+      db.exec(
+        "update appointments set status='concluido' where status='pendente'",
+      ),
     ).rejects.toThrow(/status/);
-    await db.exec("update appointments set status='confirmado' where status='pendente'");
+    await db.exec(
+      "update appointments set status='confirmado' where status='pendente'",
+    );
     await expect(
-      db.exec("update appointments set status='concluido' where status='confirmado'"),
+      db.exec(
+        "update appointments set status='concluido' where status='confirmado'",
+      ),
     ).rejects.toThrow(/status/);
     await asUser(ids.alice);
     await expect(
@@ -571,20 +666,20 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     );
     await db.query("select erase_account_data($1)", [ids.alice]);
     expect(
-      (await db.query("select * from auth.users where id=$1", [ids.alice])).rows,
+      (await db.query("select * from auth.users where id=$1", [ids.alice]))
+        .rows,
     ).toHaveLength(0);
-    const history = await db.query<{ client_id: string | null; status: string }>(
-      "select client_id,status from appointments where status='concluido'",
-    );
+    const history = await db.query<{
+      client_id: string | null;
+      status: string;
+    }>("select client_id,status from appointments where status='concluido'");
     expect(history.rows).toEqual([{ client_id: null, status: "concluido" }]);
   });
 });
 
 describe("Migração multi-barbeiro sobre banco legado", () => {
   it("promove admin existente a master e não quebra reservas sem barbeiro ativo", async () => {
-    const legacyMigrations = migrations.filter(
-      (name) => name < '202610100004',
-    );
+    const legacyMigrations = migrations.filter((name) => name < "202610100004");
     const legacy = await createDatabase(legacyMigrations);
     try {
       const legacyUser = "66666666-6666-4666-8666-666666666666";
@@ -600,7 +695,9 @@ describe("Migração multi-barbeiro sobre banco legado", () => {
           }),
         ],
       );
-      await legacy.query("update profiles set role='admin' where id=$1", [legacyUser]);
+      await legacy.query("update profiles set role='admin' where id=$1", [
+        legacyUser,
+      ]);
       await legacy.query(
         `insert into appointments(client_id,service_name,price,duration_minutes,start_at,end_at,booking_date)
          values($1,'Legado',30,40,now()+interval '3 days',now()+interval '3 days 40 minutes',(now()+interval '3 days')::date)`,
@@ -610,8 +707,12 @@ describe("Migração multi-barbeiro sobre banco legado", () => {
       const teamMigration = migrations.find((name) => name.includes("005_"));
       expect(rolesMigration).toBeTruthy();
       expect(teamMigration).toBeTruthy();
-      await legacy.exec(readFileSync(`supabase/migrations/${rolesMigration}`, "utf8"));
-      await legacy.exec(readFileSync(`supabase/migrations/${teamMigration}`, "utf8"));
+      await legacy.exec(
+        readFileSync(`supabase/migrations/${rolesMigration}`, "utf8"),
+      );
+      await legacy.exec(
+        readFileSync(`supabase/migrations/${teamMigration}`, "utf8"),
+      );
       const role = await legacy.query<{ role: string }>(
         "select role from profiles where id=$1",
         [legacyUser],
@@ -629,20 +730,31 @@ describe("Migração multi-barbeiro sobre banco legado", () => {
         "insert into auth.users(id,email,raw_user_meta_data) values($1,'barber@example.com','{}'::jsonb)",
         [legacyBarber],
       );
-      await legacy.query("update profiles set role='barber' where id=$1", [legacyBarber]);
+      await legacy.query("update profiles set role='barber' where id=$1", [
+        legacyBarber,
+      ]);
       await legacy.query(
         "insert into barbers(profile_id,display_name) values($1,'Barbeiro Inicial')",
         [legacyBarber],
       );
-      const linked = await legacy.query<{ barber_id: string; barber_name: string }>(
-        "select barber_id,barber_name from appointments",
-      );
+      const linked = await legacy.query<{
+        barber_id: string;
+        barber_name: string;
+      }>("select barber_id,barber_name from appointments");
       expect(linked.rows[0].barber_id).toBeTruthy();
       expect(linked.rows[0].barber_name).toBe("Barbeiro Inicial");
-      const multiMigration=migrations.find(name=>name.includes('006_'))!;
-      await legacy.exec(readFileSync(`supabase/migrations/${multiMigration}`,'utf8'));
-      const snapshots=await legacy.query<{name:string;price:string;duration_minutes:number}>('select name,price,duration_minutes from appointment_services');
-      expect(snapshots.rows).toEqual([{name:'Legado',price:'30.00',duration_minutes:40}]);
+      const multiMigration = migrations.find((name) => name.includes("006_"))!;
+      await legacy.exec(
+        readFileSync(`supabase/migrations/${multiMigration}`, "utf8"),
+      );
+      const snapshots = await legacy.query<{
+        name: string;
+        price: string;
+        duration_minutes: number;
+      }>("select name,price,duration_minutes from appointment_services");
+      expect(snapshots.rows).toEqual([
+        { name: "Legado", price: "30.00", duration_minutes: 40 },
+      ]);
     } finally {
       await legacy.close();
     }

@@ -3,132 +3,106 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { browserDb } from "@/lib/supabase/client";
-import {
-  loginSchema,
-  profileSchema,
-  readableError,
-  safeNext,
-} from "@/lib/validation";
-export function phoneMask(value: string) {
-  const d = value.replace(/\D/g, "").slice(0, 11);
-  return d.length > 6
-    ? `(${d.slice(0, 2)}) ${d.slice(2, -4)}-${d.slice(-4)}`
-    : d.length > 2
-      ? `(${d.slice(0, 2)}) ${d.slice(2)}`
-      : d;
-}
+import { loginSchema, readableError, safeNext } from "@/lib/validation";
+import { phoneLoginSchema, phoneMask } from "@/lib/phone-auth";
+import { PasswordInput } from "./password-input";
+import { QuickSignup } from "./quick-signup";
+export { phoneMask } from "@/lib/phone-auth";
 export function AuthForm({
   mode,
 }: {
   mode: "login" | "cadastro" | "recuperar" | "redefinir";
 }) {
+  const [staff, setStaff] = useState(false);
+  const [phone, setPhone] = useState("");
+  const [next, setNext] = useState("/");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [phone, setPhone] = useState("");
-  const [nextPath, setNextPath] = useState("/");
   useEffect(() => {
     const query = new URLSearchParams(location.search);
-    setNextPath(safeNext(query.get("next")));
+    setNext(safeNext(query.get("next")));
+    setStaff(
+      query.get("equipe") === "1" ||
+        query.get("next")?.startsWith("/painelinterno") === true,
+    );
     if (query.get("erro") === "link")
-      setError(
-        "Este link é inválido ou expirou. Solicite um novo e-mail e abra no mesmo navegador.",
-      );
+      setError("Este link é inválido ou expirou. Solicite um novo e-mail.");
   }, []);
-  const register = mode === "cadastro";
-  const title = {
-    login: "Bem-vindo de volta",
-    cadastro: "Seu próximo estilo começa aqui",
-    recuperar: "Esqueci minha senha",
-    redefinir: "Crie uma nova senha",
-  }[mode];
-  async function submit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
     setError("");
     setMessage("");
-    setBusy(true);
     try {
-      const form = Object.fromEntries(new FormData(e.currentTarget));
-      const db = browserDb();
-      const next = safeNext(new URLSearchParams(location.search).get("next"));
+      const form = Object.fromEntries(new FormData(event.currentTarget));
       if (mode === "recuperar") {
         const email = loginSchema.shape.email.parse(form.email);
-        const { error } = await db.auth.resetPasswordForEmail(email, {
+        const { error } = await browserDb().auth.resetPasswordForEmail(email, {
           redirectTo: `${location.origin}/auth/callback?next=/redefinir-senha`,
         });
         if (error) throw error;
         setMessage(
           "Se este e-mail estiver cadastrado, você receberá um link para criar uma nova senha.",
         );
-      } else if (mode === "redefinir") {
+        return;
+      }
+      if (mode === "redefinir") {
         const password = loginSchema.shape.password.parse(form.password);
-        const { error } = await db.auth.updateUser({ password });
+        const { error } = await browserDb().auth.updateUser({ password });
         if (error) throw error;
         setMessage("Senha atualizada. Você já pode continuar.");
-      } else {
-        const credentials = loginSchema.parse(form);
-        if (register) {
-          const p = profileSchema.parse({
-            ...form,
-            privacy_accepted: form.privacy_accepted === "on",
-          });
-          const { data, error } = await db.auth.signUp({
-            ...credentials,
-            options: {
-              data: p,
-              emailRedirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-            },
-          });
-          if (error) throw error;
-          if (data.session) location.assign(next);
-          else
-            setMessage(
-              "Confira seu e-mail para confirmar o cadastro. Depois, entre para continuar seu agendamento.",
-            );
-        } else {
-          const { data, error } = await db.auth.signInWithPassword(credentials);
-          if (error) throw error;
-          const { data: p } = await db
-            .from("profiles")
-            .select("*")
-            .eq("id", data.user.id)
-            .single();
-          if (p?.must_change_password) {
-            location.assign(
-              `/trocar-senha?required=1&next=${encodeURIComponent(next)}`,
-            );
-            return;
-          }
-          location.assign(
-            !p?.telefone || !p?.data_nascimento || !p?.privacy_accepted_at
-              ? `/completar-cadastro?next=${encodeURIComponent(next)}`
-              : next,
-          );
-        }
+        return;
       }
-    } catch (e) {
-      setError(readableError(e));
+      if (!staff) {
+        const credentials = phoneLoginSchema.parse({
+          ...form,
+          telefone: phone,
+        });
+        const response = await fetch("/api/auth/telefone", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(credentials),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error);
+        location.assign(
+          result.must_change_password
+            ? `/trocar-senha?required=1&next=${encodeURIComponent(next)}`
+            : next,
+        );
+        return;
+      }
+      const db = browserDb();
+      const { data, error } = await db.auth.signInWithPassword(
+        loginSchema.parse(form),
+      );
+      if (error) throw error;
+      const { data: profile } = await db
+        .from("profiles")
+        .select("must_change_password")
+        .eq("id", data.user.id)
+        .single();
+      location.assign(
+        profile?.must_change_password
+          ? `/trocar-senha?required=1&next=${encodeURIComponent(next)}`
+          : next,
+      );
+    } catch (error) {
+      setError(readableError(error));
     } finally {
       setBusy(false);
     }
   }
-  async function google() {
-    setBusy(true);
-    setError("");
-    try {
-      const next = safeNext(new URLSearchParams(location.search).get("next"));
-      const { error } = await browserDb().auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
-        },
-      });
-      if (error) throw error;
-    } catch (e) {
-      setError(readableError(e));
-      setBusy(false);
-    }
-  }
+  if (mode === "cadastro")
+    return (
+      <div className="auth">
+        <QuickSignup onComplete={() => location.assign(next)} />
+        <Link href={`/login?next=${encodeURIComponent(next)}`}>
+          Já tenho uma conta
+        </Link>
+      </div>
+    );
   return (
     <section className="auth card">
       <Image
@@ -139,104 +113,101 @@ export function AuthForm({
         className="auth-logo"
       />
       <p className="eyebrow">SEVEN STARS BARBERSHOP</p>
-      <h1>{title}</h1>
-      <p className="muted">
-        {register
-          ? "Crie sua conta e reserve um tempo para você."
-          : "O cuidado de sempre, no horário que combina com você."}
-      </p>
-      <form onSubmit={submit}>
-        {register && (
-          <>
-            <label>
-              Nome completo
-              <input name="nome" autoComplete="name" required />
-            </label>
-            <label>
-              Telefone com DDD
-              <input
-                name="telefone"
-                type="tel"
-                autoComplete="tel"
-                value={phone}
-                onChange={(e) => setPhone(phoneMask(e.target.value))}
-                required
-              />
-            </label>
-            <label>
-              Data de nascimento
-              <input name="data_nascimento" type="date" required />
-            </label>
-          </>
-        )}
-        {mode !== "redefinir" && (
-          <label>
-            E-mail
-            <input name="email" type="email" autoComplete="email" required />
-          </label>
-        )}
-        {mode !== "recuperar" && (
-          <label>
-            Senha
-            <input
-              name="password"
-              type="password"
-              minLength={8}
-              autoComplete={
-                mode === "login" ? "current-password" : "new-password"
-              }
-              required
-            />
-            <small className="muted">Pelo menos 8 caracteres.</small>
-          </label>
-        )}
-        {register && (
-          <label className="check">
-            <input name="privacy_accepted" type="checkbox" required />
-            Li e aceito a{" "}
-            <Link href="/privacidade">política de privacidade</Link>.
-          </label>
-        )}
-        {error && (
-          <p role="alert" className="error">
-            {error}
-          </p>
-        )}
-        {message && (
-          <p role="status" className="success">
-            {message}
-          </p>
-        )}
-        <button className="button full" disabled={busy}>
-          {busy
-            ? "Aguarde…"
-            : {
-                login: "Entrar",
-                cadastro: "Criar minha conta",
-                recuperar: "Enviar link de recuperação",
-                redefinir: "Salvar nova senha",
-              }[mode]}
-        </button>
-      </form>
-      {(register || mode === "login") && (
-        <>
-          <div className="divider">ou</div>
+      <h1>
+        {mode === "login"
+          ? "Bem-vindo de volta"
+          : mode === "recuperar"
+            ? "Esqueci minha senha"
+            : "Crie uma nova senha"}
+      </h1>
+      {mode !== "redefinir" && (
+        <div className="row auth-mode">
           <button
-            disabled={busy}
-            className="button outline full"
-            onClick={google}
+            className={`button ${staff ? "outline" : ""}`}
+            onClick={() => {
+              setStaff(false);
+              setError("");
+            }}
           >
-            Continuar com Google
+            Sou cliente
           </button>
-        </>
+          <button
+            className={`button ${staff ? "" : "outline"}`}
+            onClick={() => {
+              setStaff(true);
+              setError("");
+            }}
+          >
+            Sou da equipe
+          </button>
+        </div>
+      )}
+      {mode === "recuperar" && !staff ? (
+        <p role="status" className="muted">
+          Para recuperar sua senha, fale com a barbearia. A equipe fornecerá uma
+          senha provisória, que você deverá trocar no próximo acesso.
+        </p>
+      ) : (
+        <form onSubmit={submit}>
+          {mode !== "redefinir" &&
+            (staff ? (
+              <label>
+                E-mail
+                <input
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                />
+              </label>
+            ) : (
+              <label>
+                Telefone com DDD
+                <input
+                  name="telefone"
+                  type="tel"
+                  autoComplete="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(phoneMask(e.target.value))}
+                  required
+                />
+              </label>
+            ))}
+          {mode !== "recuperar" && (
+            <PasswordInput
+              autoComplete={
+                mode === "redefinir" ? "new-password" : "current-password"
+              }
+            />
+          )}
+          <button className="button full" disabled={busy}>
+            {busy
+              ? "Aguarde…"
+              : mode === "recuperar"
+                ? "Enviar link de recuperação"
+                : mode === "redefinir"
+                  ? "Salvar nova senha"
+                  : "Entrar"}
+          </button>
+        </form>
+      )}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      {message && (
+        <p className="success" role="status">
+          {message}
+        </p>
       )}
       <div className="auth-links">
-        <Link
-          href={`${register ? "/login" : "/cadastro"}?next=${encodeURIComponent(nextPath)}`}
-        >
-          {register ? "Já tenho uma conta" : "Criar uma conta"}
+        <Link href={`/cadastro?next=${encodeURIComponent(next)}`}>
+          Criar uma conta
         </Link>
-        <Link href="/esqueci-senha">Esqueci minha senha</Link>
+        <Link href={`/esqueci-senha${staff ? "?equipe=1" : ""}`}>
+          Esqueci minha senha
+        </Link>
       </div>
       {mode === "redefinir" && message && (
         <Link className="button" href="/">

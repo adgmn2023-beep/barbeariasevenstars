@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { serverDb, privilegedDb } from "@/lib/supabase/server";
 import { readableError } from "@/lib/validation";
+import { clientPasswordSchema } from "@/lib/phone-auth";
 
 const passwordSchema = z
   .string()
@@ -15,7 +16,7 @@ const passwordSchema = z
 export async function POST(request: Request) {
   try {
     const { password } = z
-      .object({ password: passwordSchema })
+      .object({ password: clientPasswordSchema })
       .parse(await request.json());
     const db = await serverDb();
     const {
@@ -26,6 +27,13 @@ export async function POST(request: Request) {
         { error: "Entre na sua conta para continuar." },
         { status: 401 },
       );
+    const { data: profile, error: profileError } = await db
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    if (profileError) throw new Error("Não foi possível verificar seu acesso.");
+    if (profile.role !== "client") passwordSchema.parse(password);
     const { error: passwordError } = await db.auth.updateUser({ password });
     if (passwordError) throw passwordError;
     const privileged = privilegedDb();

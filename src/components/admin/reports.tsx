@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -30,6 +30,41 @@ export async function allRows<T>(table: string, columns: string): Promise<T[]> {
   }
 }
 export function Clients() {
+  const [credential, setCredential] = useState<{
+    name: string;
+    password: string;
+  } | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const credentialsDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (credential) credentialsDialog.current?.showModal();
+  }, [credential]);
+  async function resetPassword(client: Profile) {
+    if (
+      !window.confirm(
+        `Redefinir a senha de ${client.nome}? A senha atual deixará de funcionar.`,
+      )
+    )
+      return;
+    setResetting(true);
+    setError("");
+    setCredential(null);
+    try {
+      const response = await fetch(`/api/admin/clientes/${client.id}/senha`, {
+        method: "POST",
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setCredential({
+        name: client.nome,
+        password: result.provisionalPassword,
+      });
+    } catch (error) {
+      setError(readableError(error));
+    } finally {
+      setResetting(false);
+    }
+  }
   const [clients, setClients] = useState<Profile[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [query, setQuery] = useState("");
@@ -91,8 +126,8 @@ export function Clients() {
                 <th>Nome</th>
                 <th>Telefone</th>
                 <th>E-mail</th>
-                <th>Nascimento</th>
                 <th>Agendamentos</th>
+                <th>Acesso</th>
               </tr>
             </thead>
             <tbody>
@@ -100,12 +135,21 @@ export function Clients() {
                 <tr key={p.id}>
                   <td>{p.nome}</td>
                   <td>{p.telefone ?? "Não informado"}</td>
-                  <td>{p.email}</td>
                   <td>
-                    {p.data_nascimento?.split("-").reverse().join("/") ??
-                      "Não informado"}
+                    {p.email.endsWith("@clientes.sevenstars.invalid")
+                      ? "Acesso por telefone"
+                      : p.email}
                   </td>
                   <td>{counts[p.id] ?? 0}</td>
+                  <td>
+                    <button
+                      className="button outline"
+                      disabled={resetting}
+                      onClick={() => resetPassword(p)}
+                    >
+                      Redefinir senha
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -115,6 +159,33 @@ export function Clients() {
           )}
         </div>
       )}
+      <dialog
+        ref={credentialsDialog}
+        className="card cancel-dialog"
+        onClose={() => setCredential(null)}
+      >
+        {credential && (
+          <>
+            <h2>Senha provisória de {credential.name}</h2>
+            <p>
+              Exibida somente agora. Entregue ao cliente; ele deverá alterá-la
+              no próximo acesso.
+            </p>
+            <output className="provisional-password">
+              {credential.password}
+            </output>
+            <button
+              className="button"
+              onClick={() => {
+                credentialsDialog.current?.close();
+                setCredential(null);
+              }}
+            >
+              Já anotei, fechar
+            </button>
+          </>
+        )}
+      </dialog>
     </>
   );
 }
@@ -122,7 +193,9 @@ export function Dashboard() {
   const [from, setFrom] = useState(localDate());
   const [to, setTo] = useState(localDate());
   const [items, setItems] = useState<Appointment[]>([]);
-  const [barbers, setBarbers] = useState<{ id: string; display_name: string; active: boolean }[]>([]);
+  const [barbers, setBarbers] = useState<
+    { id: string; display_name: string; active: boolean }[]
+  >([]);
   const [barberId, setBarberId] = useState("");
   const [clients, setClients] = useState(0);
   const [error, setError] = useState("");
@@ -141,7 +214,9 @@ export function Dashboard() {
           .gte("booking_date", from)
           .lte("booking_date", to);
         if (barberId) query = query.eq("barber_id", barberId);
-        const { data, error } = await query.order("id").range(offset, offset + 999);
+        const { data, error } = await query
+          .order("id")
+          .range(offset, offset + 999);
         if (error) throw error;
         all.push(...data);
         if (data.length < 1000) break;
@@ -212,11 +287,15 @@ export function Dashboard() {
       <div className="row section-head">
         <label>
           Barbeiro
-          <select value={barberId} onChange={(event) => setBarberId(event.target.value)}>
+          <select
+            value={barberId}
+            onChange={(event) => setBarberId(event.target.value)}
+          >
             <option value="">Todos</option>
             {barbers.map((barber) => (
               <option key={barber.id} value={barber.id}>
-                {barber.display_name}{barber.active ? "" : " (inativo)"}
+                {barber.display_name}
+                {barber.active ? "" : " (inativo)"}
               </option>
             ))}
           </select>
