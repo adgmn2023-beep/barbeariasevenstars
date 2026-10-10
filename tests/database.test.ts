@@ -10,6 +10,7 @@ const ids = {
   barberAProfile: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   barberBProfile: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   master: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  admin: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
   barberA: "44444444-4444-4444-8444-444444444444",
   barberB: "55555555-5555-4555-8555-555555555555",
 };
@@ -66,6 +67,7 @@ beforeAll(async () => {
     ids.barberAProfile,
     ids.barberBProfile,
     ids.master,
+    ids.admin,
   ];
   await db.query(
     "insert into auth.users(id,email,raw_user_meta_data) select id,id::text || '@example.com',$2::jsonb from unnest($1::uuid[]) as id",
@@ -74,6 +76,7 @@ beforeAll(async () => {
   await db.exec(
     `update profiles set role='barber' where id in ('${ids.barberAProfile}','${ids.barberBProfile}');
      update profiles set role='master' where id='${ids.master}';
+     update profiles set role='admin' where id='${ids.admin}';
      insert into barbers(id,profile_id,display_name) values
        ('${ids.barberA}','${ids.barberAProfile}','Barbeiro A'),
        ('${ids.barberB}','${ids.barberBProfile}','Barbeiro B');`,
@@ -93,6 +96,13 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await asOwner();
+  await db.exec(
+    `update profiles set role='client' where id in ('${ids.alice}','${ids.bob}','${ids.carol}');
+     update profiles set role='barber' where id in ('${ids.barberAProfile}','${ids.barberBProfile}');
+     update profiles set role='master' where id='${ids.master}';
+     update profiles set role='admin' where id='${ids.admin}';
+     delete from barbers where profile_id='${ids.admin}';`,
+  );
   await db.exec("delete from appointments;delete from blocked_slots;");
   await db.exec("update barbers set active=true;");
 });
@@ -119,7 +129,7 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
     expect((await db.query("select * from profiles")).rows).toHaveLength(1);
     await expect(
       db.exec(`update profiles set role='master' where id='${ids.alice}'`),
-    ).rejects.toThrow(/permissões/);
+    ).rejects.toThrow(/master|permissões/);
   });
 
   it("não permite vincular como barbeiro um perfil client", async () => {
@@ -128,7 +138,53 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
         "insert into barbers(profile_id,display_name) values($1,'Perfil inválido')",
         [ids.alice],
       ),
-    ).rejects.toThrow(/papel barber/);
+    ).rejects.toThrow(/barbeiro, admin ou master/);
+  });
+
+  it("admin comum não promove a admin/master, mas master pode", async () => {
+    await asUser(ids.admin);
+    await expect(
+      db.exec(`update profiles set role='admin' where id='${ids.bob}'`),
+    ).rejects.toThrow(/Somente master/);
+    await expect(
+      db.exec(`update profiles set role='master' where id='${ids.bob}'`),
+    ).rejects.toThrow(/Somente master/);
+    await db.exec(`update profiles set role='barber' where id='${ids.bob}'`);
+
+    await asUser(ids.master);
+    await db.exec(`update profiles set role='admin' where id='${ids.bob}'`);
+    await db.exec(`update profiles set role='master' where id='${ids.bob}'`);
+    const promoted = await db.query<{ role: string }>(
+      "select role from profiles where id=$1",
+      [ids.bob],
+    );
+    expect(promoted.rows[0].role).toBe("master");
+  });
+
+  it("service_role mantém autorização para alterar papéis", async () => {
+    await db.exec("reset role;set role service_role;");
+    await db.exec(`update profiles set role='master' where id='${ids.bob}'`);
+    const updated = await db.query<{ role: string }>(
+      "select role from profiles where id=$1",
+      [ids.bob],
+    );
+    expect(updated.rows[0].role).toBe("master");
+  });
+
+  it("aceita admin com registro em barbers e impede rebaixá-lo a client", async () => {
+    await asUser(ids.admin);
+    const created = await db.query<{ id: string }>(
+      "insert into barbers(profile_id,display_name) values($1,'Dono da barbearia') returning id",
+      [ids.admin],
+    );
+    expect(created.rows[0].id).toBeTruthy();
+    await expect(
+      db.exec(`update profiles set role='client' where id='${ids.admin}'`),
+    ).rejects.toThrow(/Somente master/);
+    await asUser(ids.master);
+    await expect(
+      db.exec(`update profiles set role='client' where id='${ids.admin}'`),
+    ).rejects.toThrow(/Desative o vínculo/);
   });
 
   it("dois clientes reservam o mesmo horário com barbeiros diferentes", async () => {
@@ -209,7 +265,26 @@ describe("Regras multi-barbeiro no PostgreSQL e RLS", () => {
       [other],
     );
     expect(hiddenUpdate.rowCount).toBe(0);
-    expect((await db.query("select * from profiles")).rows).toHaveLength(1);
+    const visibleProfiles = await db.query<{ id: string }>(
+      "select id from profiles order by id",
+    );
+    expect(visibleProfiles.rows.map((profile) => profile.id).sort()).toEqual(
+      [ids.alice, ids.barberAProfile].sort(),
+    );
+  });
+
+  it("barbeiro lê profiles de clientes próprios, mas não de outros barbeiros", async () => {
+    await asUser(ids.alice);
+    await book("09:00", ids.barberA);
+    await asUser(ids.bob);
+    await book("09:00", ids.barberB);
+    await asUser(ids.barberAProfile);
+    const visible = await db.query<{ id: string }>(
+      "select id from profiles order by id",
+    );
+    expect(visible.rows.map((profile) => profile.id).sort()).toEqual(
+      [ids.alice, ids.barberAProfile].sort(),
+    );
   });
 
   it("barbeiro não escreve serviços, não lê settings nem perfis alheios", async () => {

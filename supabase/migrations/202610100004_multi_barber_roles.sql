@@ -1,3 +1,5 @@
+begin;
+
 create extension if not exists btree_gist;
 
 alter table public.profiles drop constraint if exists profiles_role_check;
@@ -18,8 +20,8 @@ language plpgsql security definer set search_path=public as $$
 declare linked_role text;
 begin
   select p.role into linked_role from public.profiles p where p.id=new.profile_id;
-  if linked_role is distinct from 'barber' then
-    raise exception 'O perfil vinculado precisa ter o papel barber.';
+  if linked_role not in ('barber','admin','master') then
+    raise exception 'O perfil vinculado precisa ser barbeiro, admin ou master.';
   end if;
   return new;
 end $$;
@@ -59,6 +61,10 @@ create or replace function public.is_admin_or_master() returns boolean
 language sql stable security definer set search_path=public as $$
   select exists(select 1 from public.profiles where id=auth.uid() and role in ('admin','master'))
 $$;
+create or replace function public.is_master() returns boolean
+language sql stable security definer set search_path=public as $$
+  select exists(select 1 from public.profiles where id=auth.uid() and role='master')
+$$;
 create or replace function public.is_staff() returns boolean
 language sql stable security definer set search_path=public as $$
   select exists(select 1 from public.profiles where id=auth.uid() and role in ('barber','admin','master'))
@@ -79,8 +85,14 @@ $$;
 create or replace function public.guard_profile() returns trigger
 language plpgsql set search_path=public as $$ begin
   if current_user in ('authenticated','anon') then
-    if new.role is distinct from old.role and not public.is_admin_or_master() then
-      raise exception 'Não é permitido alterar permissões.';
+    if new.role is distinct from old.role and not public.is_master() then
+      if old.role in ('admin','master') or new.role in ('admin','master') then
+        raise exception 'Somente master pode alterar os papéis admin e master.';
+      end if;
+      if old.role not in ('client','barber') or new.role not in ('client','barber')
+        or not public.is_admin_or_master() then
+        raise exception 'Não é permitido alterar permissões.';
+      end if;
     end if;
     if (new.email is distinct from old.email or new.id is distinct from old.id)
       and not public.is_admin_or_master() then
@@ -88,7 +100,7 @@ language plpgsql set search_path=public as $$ begin
     end if;
   end if;
   if exists(select 1 from public.barbers b where b.profile_id=old.id)
-    and new.role is distinct from 'barber' then
+    and new.role='client' then
     raise exception 'Desative o vínculo de barbeiro antes de alterar o papel.';
   end if;
   return new;
@@ -325,7 +337,16 @@ end $$;
 drop policy if exists profiles_read on public.profiles;
 drop policy if exists profiles_update on public.profiles;
 create policy profiles_read on public.profiles for select to authenticated
-  using(id=auth.uid() or public.is_admin_or_master());
+  using(
+    id=auth.uid()
+    or public.is_admin_or_master()
+    or (
+      role='client' and exists(
+        select 1 from public.appointments a
+        where a.client_id=profiles.id and a.barber_id=public.current_barber_id()
+      )
+    )
+  );
 create policy profiles_update on public.profiles for update to authenticated
   using(id=auth.uid() or public.is_admin_or_master())
   with check(id=auth.uid() or public.is_admin_or_master());
@@ -384,6 +405,7 @@ grant all on public.profiles,public.services,public.appointments,public.blocked_
 
 revoke all on function public.is_staff() from public,anon,authenticated;
 revoke all on function public.is_admin_or_master() from public,anon,authenticated;
+revoke all on function public.is_master() from public,anon,authenticated;
 revoke all on function public.current_barber_id() from public,anon,authenticated;
 revoke all on function public.is_barber() from public,anon,authenticated;
 revoke all on function public.is_admin() from public,anon,authenticated;
@@ -393,6 +415,7 @@ revoke all on function public.list_active_barbers() from public,anon,authenticat
 revoke all on function public.deactivate_barber(uuid,uuid) from public,anon,authenticated;
 grant execute on function public.is_staff() to authenticated;
 grant execute on function public.is_admin_or_master() to authenticated;
+grant execute on function public.is_master() to authenticated;
 grant execute on function public.current_barber_id() to authenticated;
 grant execute on function public.is_barber() to anon,authenticated;
 grant execute on function public.is_admin_or_master() to anon;
@@ -413,3 +436,5 @@ do $$ begin
     where pubname='supabase_realtime' and schemaname='public' and tablename='blocked_slots'
   ) then alter publication supabase_realtime add table public.blocked_slots; end if;
 end $$;
+
+commit;
