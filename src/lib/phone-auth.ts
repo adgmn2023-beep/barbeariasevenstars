@@ -33,6 +33,10 @@ export const PHONE_EXISTS_MESSAGE =
 export function technicalEmail(phone: string) {
   return `55${phoneSchema.parse(phone)}@clientes.sevenstars.invalid`;
 }
+export function loginEmail(identifier: string) {
+  const value = identifier.trim();
+  return value.includes("@") ? value : technicalEmail(value);
+}
 export function phoneMask(value: string) {
   const d = normalizePhone(value).slice(0, 11);
   return d.length > 6

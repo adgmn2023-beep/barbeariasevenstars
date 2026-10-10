@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+
 test.beforeEach(async ({ page }) => {
   await page.route("**/rest/v1/services?*", (route) =>
     route.fulfill({
@@ -41,20 +42,20 @@ test.beforeEach(async ({ page }) => {
     }),
   );
 });
+
 test("página inicial, serviços e seleção sem transbordar", async ({ page }) => {
   const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "Seu estilo. Seu momento." }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /Corte Simples/ }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /Corte Simples/ })).toBeVisible();
   await page.getByRole("button", { name: /Corte Simples/ }).click();
-  await expect(
-    page.getByRole("button", { name: /Corte Simples/ }),
-  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: /Corte Simples/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   const button = page.getByRole("button", { name: "Continuar" });
   if (
     await page
@@ -74,11 +75,25 @@ test("página inicial, serviços e seleção sem transbordar", async ({ page }) 
     fullPage: true,
   });
 });
+
 test("autenticação, política e proteção do painel", async ({ page }) => {
   await page.goto("/login");
   await expect(
     page.getByRole("heading", { name: "Bem-vindo de volta" }),
   ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sou cliente" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Sou da equipe" })).toHaveCount(0);
+  await expect(page.getByLabel("Telefone ou e-mail")).toBeVisible();
+  await expect(page.getByLabel("Senha", { exact: true })).toHaveAttribute(
+    "type",
+    "password",
+  );
+  await page.getByRole("button", { name: "Mostrar senha" }).click();
+  await expect(page.getByLabel("Senha", { exact: true })).toHaveAttribute(
+    "type",
+    "text",
+  );
+  await page.getByRole("button", { name: "Ocultar senha" }).click();
   await page.getByRole("link", { name: "Criar uma conta" }).click();
   await expect(page.getByLabel("Telefone com DDD")).toBeVisible();
   await page.getByLabel("Telefone com DDD").fill("11999999999");
@@ -97,9 +112,59 @@ test("autenticação, política e proteção do painel", async ({ page }) => {
   await page.goto("/painelinterno");
   await expect(page).toHaveURL(/\/login/);
 });
-test("pula a escolha de barbeiro quando há apenas um ativo", async ({
+
+test("recuperação de cliente orienta falar com a barbearia e e-mail segue no Supabase", async ({
   page,
 }) => {
+  let requestedEmail = "";
+  await page.route("**/auth/v1/recover**", async (route) => {
+    requestedEmail = String(route.request().postDataJSON().email);
+    await route.fulfill({ status: 200, json: {} });
+  });
+  await page.goto("/esqueci-senha");
+  await page.getByLabel("Telefone ou e-mail").fill("(11) 99999-8888");
+  await page.getByRole("button", { name: "Enviar link de recuperação" }).click();
+  await expect(page.getByRole("status")).toContainText("fale com a barbearia");
+  expect(requestedEmail).toBe("");
+
+  await page.getByLabel("Telefone ou e-mail").fill("cliente@example.com");
+  await page.getByRole("button", { name: "Enviar link de recuperação" }).click();
+  await expect(page.getByRole("status")).toContainText("receberá um link");
+  expect(requestedEmail).toBe("cliente@example.com");
+});
+
+test("login usa e-mail técnico para telefone e uma mensagem genérica", async ({
+  page,
+}) => {
+  const attemptedEmails: string[] = [];
+  await page.route("**/auth/v1/token*", async (route) => {
+    attemptedEmails.push(String(route.request().postDataJSON().email));
+    await route.fulfill({
+      status: 400,
+      json: { code: "invalid_credentials", msg: "Invalid login credentials" },
+    });
+  });
+  await page.goto("/login?next=%2Fpainelinterno");
+  await page.getByLabel("Telefone ou e-mail").fill("+55 (11) 99999-8888");
+  await page.getByLabel("Senha", { exact: true }).fill("SenhaErrada123!");
+  await page.getByRole("button", { name: "Entrar" }).click();
+  await expect(page.locator("main p[role='alert']")).toHaveText(
+    "Telefone/e-mail ou senha incorretos.",
+  );
+  expect(attemptedEmails[0]).toBe(
+    "5511999998888@clientes.sevenstars.invalid",
+  );
+
+  await page.getByLabel("Telefone ou e-mail").fill("barbeiro@example.com");
+  await page.getByRole("button", { name: "Entrar" }).click();
+  await expect(page.locator("main p[role='alert']")).toHaveText(
+    "Telefone/e-mail ou senha incorretos.",
+  );
+  expect(attemptedEmails[1]).toBe("barbeiro@example.com");
+  await expect(page).toHaveURL(/\/login\?next=%2Fpainelinterno/);
+});
+
+test("pula a escolha de barbeiro quando há apenas um ativo", async ({ page }) => {
   await page.goto("/");
   test.skip(
     await page
@@ -114,6 +179,7 @@ test("pula a escolha de barbeiro quando há apenas um ativo", async ({
     page.getByRole("heading", { name: "Escolha o barbeiro" }),
   ).toHaveCount(0);
 });
+
 test("telefone duplicado abre login por telefone com a seleção preservada", async ({
   page,
 }) => {
