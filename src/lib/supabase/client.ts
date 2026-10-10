@@ -1,0 +1,4 @@
+'use client';
+import {createBrowserClient} from '@supabase/ssr';
+export const configured=()=>Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL&&process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+export function browserDb(){if(!configured())throw new Error('O sistema ainda está sendo configurado. Tente novamente em breve.');return createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);}
