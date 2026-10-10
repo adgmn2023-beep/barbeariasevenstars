@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { serverDb, privilegedDb } from "@/lib/supabase/server";
-import { readableError } from "@/lib/validation";
 import { clientPasswordSchema } from "@/lib/phone-auth";
 
 const passwordSchema = z
@@ -42,14 +41,28 @@ export async function POST(request: Request) {
       .update({ must_change_password: false })
       .eq("id", user.id);
     if (error) throw error;
-    const { error: auditError } = await privileged.from("audit_log").insert({
-      actor_profile_id: user.id,
-      target_profile_id: user.id,
-      action: "provisional_password_changed",
-    });
-    if (auditError) throw auditError;
-    return NextResponse.json({ ok: true });
+    // A auditoria de equipe mantém seu ator; clientes continuam podendo excluir a conta.
+    if (profile.role !== "client") {
+      const { error: auditError } = await privileged.from("audit_log").insert({
+        actor_profile_id: user.id,
+        target_profile_id: user.id,
+        action: "provisional_password_changed",
+      });
+      if (auditError) throw auditError;
+    }
+    return NextResponse.json(
+      { ok: true },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
-    return NextResponse.json({ error: readableError(error) }, { status: 400 });
+    return NextResponse.json(
+      {
+        error:
+          error instanceof z.ZodError
+            ? "A senha não atende aos requisitos informados."
+            : "Não foi possível alterar sua senha. Tente novamente.",
+      },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
   }
 }

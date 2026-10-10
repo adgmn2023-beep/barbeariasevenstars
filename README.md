@@ -2,6 +2,27 @@
 
 Sistema de agendamento para uma barbearia com **múltiplos barbeiros e agendas individuais**, em português do Brasil. Next.js App Router, TypeScript, Tailwind CSS, Supabase Auth/Postgres/Realtime, Recharts e Web Push. Sem pagamentos online, WhatsApp automático ou publicação em lojas.
 
+## Atualização 006: ação manual necessária
+
+Se as migrations 001–005 já estão aplicadas, execute **somente** [`supabase/migrations/202610100006_multi_services_phone_auth.sql`](supabase/migrations/202610100006_multi_services_phone_auth.sql) no SQL Editor do mesmo projeto Supabase, uma única vez. As migrations anteriores foram preservadas. A 006 cria os snapshots de serviços, preenche o histórico existente, acrescenta as funções de telefone/rate limit e atualiza a reserva para aceitar vários serviços. Não apaga reservas nem exige recadastrar clientes.
+
+Esta entrega contém commits locais por etapa, sem `git push` e sem aplicação remota da migration. Para disponibilizar em produção, publique esses commits/deploy quando desejar, **após aplicar a 006**, mantendo `SUPABASE_SERVICE_ROLE_KEY` somente no ambiente do servidor. Não há nova variável obrigatória.
+
+## Fluxo do cliente
+
+- Marque um ou mais serviços; preço e duração são somados. Todas as validações de disponibilidade usam a duração total.
+- Com apenas um barbeiro ativo, ele é selecionado automaticamente. Com dois ou mais, aparece a escolha, incluindo “Sem preferência”.
+- O desktop mostra o resumo lateral. No celular, a barra fixa exibe quantidade, preço e duração durante o fluxo e abre o detalhe em um painel inferior.
+- Ao confirmar sem sessão, “Seus dados” pede apenas nome, telefone com DDD, senha de no mínimo 8 caracteres e consentimento. O servidor cria a conta, inicia a sessão e agenda a seleção preservada. O popup direciona a “Ver meus agendamentos”.
+- Telefone já cadastrado abre o login inline com a mensagem “Esse telefone já tem conta. Entre com sua senha.”. Se o horário for ocupado durante o cadastro, a conta e a sessão permanecem; basta alterar o horário.
+- Clientes entram por telefone e senha; a equipe continua com e-mail e senha. Recuperação do cliente: procurar a barbearia. Admin/master usam **Clientes → Redefinir senha**; a senha provisória aparece uma única vez e deve ser alterada no próximo acesso.
+
+O telefone é normalizado para DDD+número e convertido internamente em `55{telefone}@clientes.sevenstars.invalid`. Esse identificador não recebe e-mails. A conta é criada no servidor por `auth.admin.createUser`, com `email_confirm: true`; isso não verifica a posse do telefone por SMS. Clientes legados com e-mail real também podem entrar pelo telefone já existente. Se houver mais de um perfil legado com o mesmo telefone, a equipe precisa corrigir essa duplicidade antes do login. Telefones de contas técnicas não podem ser alterados pelo próprio cliente.
+
+Senhas são enviadas exclusivamente às operações do Supabase Auth; a aplicação não as persiste em tabelas, metadados, auditoria, logs, localStorage ou sessionStorage. Apenas o hash fica no Auth. `profiles.must_change_password` é uma flag booleana. A senha provisória fica somente na resposta sem cache e na memória do diálogo até ser fechado.
+
+O limite persistente é de 5 tentativas de cadastro e 15 de login por IP a cada 15 minutos. `auth_rate_limits` guarda somente contadores e HMAC do IP, com limpeza de registros vencidos nas próximas tentativas. Em Vercel, usamos o [`x-forwarded-for` substituído pela plataforma](https://vercel.com/docs/headers/request-headers). Fora da Vercel, não confiamos em cabeçalhos enviados pelo cliente: há um limite compartilhado conservador; adapte a identificação ao proxy confiável caso hospede em outra infraestrutura. Não registre corpos de requisições de autenticação em ferramentas externas de monitoramento.
+
 ## Executar localmente
 
 Requer Node.js 22.12+ (recomendado: Node 24 LTS) e npm. Use **npm e package-lock.json** como referência para as dependências.
@@ -30,7 +51,7 @@ npm run build
 npm run test:browser
 ```
 
-O teste de navegador inicia o servidor de produção e cobre desktop e celular, navegação pública, proteção do painel, manifesto, ícones e tela offline. As consultas públicas ao banco são interceptadas por fixtures, sem alterar dados reais. Sem variáveis Supabase, verifica também o estado de configuração inicial e pula apenas o cenário de seleção de horário e retorno do login. Com URL/chave pública, esse cenário verifica a reserva de 80 minutos, almoço e preservação da seleção. Os testes de regras/SQL são independentes das contas externas.
+O Playwright inicia o build de produção na porta 3100 (`PLAYWRIGHT_PORT` permite alterar), sem reutilizar o servidor de desenvolvimento. Usa Chrome em desktop e celular e intercepta consultas públicas e APIs de cadastro/login/reserva, sem criar contas ou reservas reais. Execute com URL/chave pública Supabase no build. Cobre múltiplos serviços, duração combinada de 80 minutos, almoço/fechamento, resumo móvel, barbeiro único, cadastro inline, senha visível/oculta, seleção preservada, telefone duplicado e popup final, além de painel protegido e PWA. Os testes de regras/SQL e de handlers são independentes de contas externas; a integração final do Auth hospedado deve ser verificada após aplicar a 006.
 
 Na verificação desta entrega, `npm audit --omit=dev` retornou zero vulnerabilidades. A auditoria completa ainda indicou cinco alertas na cadeia de desenvolvimento do ESLint (`braces`/`micromatch`/`fast-glob`/plugin Next). A correção sugerida pelo npm era fazer downgrade do eslint-config-next; não foi aplicada por incompatibilidade com a versão do framework. Reavalie as atualizações dessas ferramentas periodicamente.
 
@@ -49,9 +70,9 @@ Na verificação desta entrega, `npm audit --omit=dev` retornou zero vulnerabili
 
 1. Crie um projeto no plano Free e guarde a senha do banco.
 2. Em Project Settings → API, copie a URL e a chave pública `anon`. A chave `service_role` vai **somente** em `SUPABASE_SERVICE_ROLE_KEY`, no servidor. Nunca adicione prefixo `NEXT_PUBLIC_` a ela.
-3. Abra o SQL Editor e execute os arquivos de `supabase/migrations/` em ordem numérica, uma única vez cada, incluindo `202610100004_multi_barber_roles.sql` e `202610100005_team_password_audit.sql`. Alternativamente use a CLI Supabase autenticada: `supabase link --project-ref SEU_PROJECT_REF` e `supabase db push`.
+3. Em projeto novo, execute os arquivos de `supabase/migrations/` em ordem numérica até `202610100006_multi_services_phone_auth.sql`, uma única vez cada. Em projeto existente com 001–005 aplicadas, execute somente 006. Não edite nem reaplique migrations já aplicadas.
 4. Confirme que `appointments` e `blocked_slots` estão na publicação `supabase_realtime`. A migração já as adiciona.
-5. Cadastre a conta do responsável e confirme o e-mail. Edite `supabase/scripts/promote_admin.sql` com esse e-mail e execute uma única vez no SQL Editor para promover a primeira conta a `master`. O master entra em Painel interno → Configurações → Equipe e cria o dono como `admin`; a senha provisória aparece uma única vez e exige troca no primeiro login. Depois disso, o dono/admin cria contas `barber` pela tela Equipe. Admin comum não pode criar nem promover outro admin. Cadastro público nunca cria papel de equipe.
+5. Se ainda não há master, crie a conta inicial com e-mail real em Supabase → Authentication → Users, usando somente o Auth para definir sua senha. Edite `supabase/scripts/promote_admin.sql` com esse e-mail e execute uma única vez no SQL Editor para promover a conta a `master`. Entre pela opção “Sou da equipe” e complete nome, telefone e consentimento no perfil. Em Painel interno → Configurações → Equipe, o master cria o dono como `admin`; a senha provisória aparece uma única vez e exige troca no primeiro login. Depois, admin cria contas `barber`. Cadastro público nunca cria papel de equipe.
 
 Serviços iniciais têm **40 minutos e R$ 0,00**, conforme o pedido. Antes de divulgar o site, ajuste preços, durações, expediente, almoço e regras em `/painelinterno`. Valores anteriores permanecem nos snapshots dos agendamentos.
 
@@ -68,27 +89,19 @@ Ative Email/Password e confirmação de e-mail. Em Email Templates, substitua o 
 - Reset password: **Redefina sua senha · Seven Stars Barbershop**.
 - Change email address: **Confirme seu novo e-mail · Seven Stars Barbershop**.
 
-Os templates usam `{{ .ConfirmationURL }}` e o fluxo PKCE do Supabase SSR. Abra o link no mesmo navegador que iniciou o cadastro/recuperação. O link expirado retorna ao login. Para entregar e-mails a clientes reais, configure SMTP próprio no Supabase: o remetente padrão é limitado e não deve ser tratado como serviço de produção. Escolha um provedor com cota gratuita e revise seus limites atuais.
-
-Para Google:
-
-1. Configure a tela de consentimento no Google Cloud e crie credenciais OAuth do tipo aplicativo Web.
-2. Adicione a URL de callback mostrada pelo Supabase, normalmente `https://SEU_PROJECT_REF.supabase.co/auth/v1/callback`, aos URIs autorizados do Google.
-3. Em Authentication → Providers → Google, salve client ID e client secret e habilite o provedor.
-4. Adicione usuários de teste se o aplicativo Google ainda estiver em modo de teste; publique a tela de consentimento quando estiver pronto.
-5. O primeiro acesso exige nome, telefone, nascimento e aceite da política antes de agendar. O Google não concede privilégios administrativos.
+O cadastro rápido de clientes não envia confirmação por e-mail e não usa Google. Os templates permanecem disponíveis para contas com e-mail real, especialmente recuperação da equipe. Eles usam `{{ .ConfirmationURL }}` e PKCE do Supabase SSR; abra o link no mesmo navegador que iniciou a recuperação. Configure SMTP próprio para entrega em produção. Clientes com identidade técnica recuperam o acesso pela barbearia.
 
 ## 3. Variáveis de ambiente
 
-| Variável                        | Uso                                                 |
-| ------------------------------- | --------------------------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`      | URL do projeto Supabase                             |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Chave pública anon, protegida por RLS               |
-| `SUPABASE_SERVICE_ROLE_KEY`     | Segredo do servidor para status, push e exclusão    |
-| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`  | Chave pública de Web Push                           |
-| `VAPID_PRIVATE_KEY`             | Chave privada de Web Push, apenas servidor          |
-| `VAPID_SUBJECT`                 | Contato real, como `mailto:contato@seudominio.com`  |
-| `NEXT_PUBLIC_SITE_URL`          | Origem pública do aplicativo, com HTTPS em produção |
+| Variável                        | Uso                                                                                |
+| ------------------------------- | ---------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`      | URL do projeto Supabase                                                            |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Chave pública anon, protegida por RLS                                              |
+| `SUPABASE_SERVICE_ROLE_KEY`     | Segredo do servidor para cadastro Auth, reset, rate limit, status, push e exclusão |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`  | Chave pública de Web Push                                                          |
+| `VAPID_PRIVATE_KEY`             | Chave privada de Web Push, apenas servidor                                         |
+| `VAPID_SUBJECT`                 | Contato real, como `mailto:contato@seudominio.com`                                 |
+| `NEXT_PUBLIC_SITE_URL`          | Origem pública do aplicativo, com HTTPS em produção                                |
 
 Não versionar `.env.local`. Variáveis `NEXT_PUBLIC_*` entram no build: alterá-las exige novo deploy.
 
@@ -134,19 +147,20 @@ Não há configuração de contas externas, segredos ou publicação automática
 - Horários armazenados como `timestamptz`, com `booking_date` local de `America/Sao_Paulo`. A grade usa o offset atual de Brasília (-03:00); se regras nacionais de fuso mudarem, revise a conversão no cliente.
 - Criação exclusivamente pela RPC `create_appointment`, com usuário autenticado e cadastro completo; INSERT direto negado.
 - Lock transacional único serializa reservas, bloqueios e mudanças de regras. Constraint de exclusão impede sobreposição de pendente, confirmado e concluído. Índice único parcial limita a um agendamento por cliente/dia nesses status.
-- Pendentes seguram horário. Cancelamento com motivo de no mínimo três caracteres libera a reserva. Transições: pendente → confirmado/cancelado; confirmado → concluído/faltou apenas após `end_at`. Confirmados não podem ser cancelados, conforme a regra solicitada.
+- Pendentes seguram horário. Cancelamento com motivo de no mínimo três caracteres libera a reserva. Transições: pendente → confirmado/cancelado; confirmado → cancelado com motivo ou concluído/faltou após `end_at`.
 - RLS em todas as tabelas, leitura pública sem dados pessoais apenas para serviços/configuração, barbeiros ativos e RPCs de disponibilidade. Clientes leem os próprios agendamentos/perfil; barbeiros leem e atualizam somente os próprios agendamentos e perfis dos clientes que atendem; admin/master gerenciam tudo. Barbeiro desativado perde acesso pelo Auth, painel e `current_barber_id()` mesmo com sessão antiga. O papel e a identidade não são editáveis pelo cliente.
 - Papéis: `client`, `barber`, `admin` e `master`. O primeiro master é promovido uma única vez pelo script `supabase/scripts/promote_admin.sql`; o master cria o dono como admin na tela Equipe. Admin comum cria barbeiros; master cria admin ou barbeiro. Usuários da equipe recebem senha provisória e precisam trocá-la no primeiro login.
-- Snapshot de nome, valor e duração preserva o histórico; receita soma somente concluídos.
+- `appointment_services` guarda nome, preço e duração de cada serviço no momento da reserva, com RLS herdada da leitura do agendamento. `appointments.price` e `duration_minutes` guardam os totais; `end_at` usa a duração somada. A RPC nova recebe `p_service_ids uuid[]`; a assinatura antiga `p_service_id uuid` continua funcionando. Alterações no catálogo não afetam o histórico. Dashboard soma os snapshots de reservas concluídas e conta cada serviço individualmente em “Serviços mais agendados”.
 - Exclusão de conta é transacional no banco. Apaga usuário Auth, perfil, assinaturas e reservas não concluídas; os concluídos perdem o vínculo pessoal. A anonimização não remove backups históricos já realizados pelo provedor, sujeitos à retenção dele.
 
 ## Testes e verificação manual
 
 `npm test` executa regras de horários/status e PostgreSQL real via PGlite com `btree_gist`. O ambiente local simula papéis e `auth.uid()` para testar SQL e RLS; ele não substitui um teste integrado no Supabase hospedado, nem um teste de concorrência com múltiplas conexões.
 
-- [ ] Cadastro com consentimento, confirmação por e-mail, login, saída, recuperação de senha e Google.
-- [ ] Google sem telefone/nascimento direciona a completar cadastro e retorna à reserva.
-- [ ] Reserva preservada ao ir de login para cadastro; nunca confirma automaticamente após autenticação.
+- [ ] Após aplicar 006, cadastro rápido com consentimento cria Auth, perfil pelo trigger, sessão e agendamento sem repetir a seleção. CPF/nascimento não são exigidos.
+- [ ] Telefone duplicado abre login; entrar conclui a seleção. “Esqueci minha senha” orienta falar com a barbearia; recuperação da equipe continua por e-mail.
+- [ ] Admin/master redefine senha de cliente; senha aparece uma vez, troca é obrigatória, nova senha funciona e exclusão da conta permanece disponível. Senha ausente em profiles/audit/logs.
+- [ ] Um barbeiro ativo pula a escolha; dois ativos exibem escolha. Resumo lateral no desktop e barra/painel inferior no celular em todas as etapas.
 - [ ] Preços/durações reais configurados; serviço de 80 min não invade almoço, fechamento, bloqueio ou outra reserva.
 - [ ] Duas contas confirmam simultaneamente o mesmo horário: somente uma reserva deve ser criada.
 - [ ] Segundo agendamento no mesmo dia retorna a mensagem correta; cancelado permite remarcar.

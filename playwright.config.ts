@@ -1,9 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
+const port = Number(process.env.PLAYWRIGHT_PORT ?? "3100");
+const baseURL = `http://localhost:${port}`;
 export default defineConfig({
   testDir: "tests/browser",
   fullyParallel: false,
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL,
     channel: "chrome",
     trace: "retain-on-failure",
   },
@@ -15,9 +17,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run start",
-    url: "http://localhost:3000",
-    reuseExistingServer: !process.env.CI,
+    command: `npm run start -- --port ${port}`,
+    url: baseURL,
+    reuseExistingServer: false,
     timeout: 60000,
   },
 });

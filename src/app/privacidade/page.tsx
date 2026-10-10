@@ -4,23 +4,30 @@ export default function Page() {
       <p className="eyebrow">SEUS DADOS, COM RESPEITO</p>
       <h1>Política de privacidade</h1>
       <p>
-        A Seven Stars Barbershop utiliza nome, telefone, e-mail e data de
-        nascimento para identificar clientes, administrar agendamentos e prestar
-        atendimento. O aceite desta política é registrado no cadastro.
+        A Seven Stars Barbershop utiliza nome e telefone para identificar
+        clientes, administrar agendamentos e prestar atendimento. O aceite desta
+        política é registrado no cadastro. Para o acesso por telefone, criamos
+        um identificador técnico interno no formato de e-mail. Contas da equipe
+        usam e-mail próprio. Não solicitamos CPF ou data de nascimento neste
+        fluxo.
       </p>
       <h2>Como usamos seus dados</h2>
       <p>
-        Seu histórico é acessível por você e pelo administrador. Horários
-        disponíveis são públicos, mas nunca revelam a identidade de clientes.
-        Usamos Supabase para autenticação e armazenamento e Vercel para hospedar
-        o sistema. Esses fornecedores podem processar dados fora do Brasil.
+        Seu histórico é acessível por você, pela administração e pelo barbeiro
+        responsável pelo atendimento. Horários disponíveis são públicos, mas
+        nunca revelam a identidade de clientes. Usamos Supabase para
+        autenticação e armazenamento e Vercel para hospedar o sistema. Esses
+        fornecedores podem processar dados fora do Brasil.
       </p>
       <h2>Notificações e armazenamento local</h2>
       <p>
         As notificações são opcionais e podem ser desativadas no perfil ou
         navegador. Cookies mantêm sua sessão. O dispositivo armazena
-        temporariamente a seleção de serviço e horário para permitir que você
-        continue após entrar.
+        temporariamente a seleção de serviços, barbeiro e horário para permitir
+        que você continue após entrar. Senhas são tratadas somente pelo Supabase
+        Auth, que armazena seu hash; não são gravadas no perfil, histórico ou
+        logs da aplicação. Para limitar tentativas abusivas, mantemos por até um
+        dia contadores associados a um hash protegido do endereço IP.
       </p>
       <h2>Seus direitos</h2>
       <p>
